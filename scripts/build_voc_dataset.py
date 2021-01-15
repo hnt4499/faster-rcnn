@@ -41,7 +41,10 @@ def read_xml(img_id, root_dir):
     for obj in root.findall('object'):
         label = obj.find('name').text
         assert "," not in label
-        difficult = obj.find('difficult').text
+
+        difficult = obj.find('difficult')
+        if difficult is not None:
+            difficult = difficult.text
 
         bnd_box = obj.find('bndbox')
         bbox = [
@@ -58,7 +61,6 @@ def read_xml(img_id, root_dir):
 
     bboxes = ",".join(map(str, bboxes))
     labels = ",".join(labels)
-    difficults = ",".join(difficults)
 
     info = {
         "ann_path": xml_path,
@@ -67,26 +69,32 @@ def read_xml(img_id, root_dir):
         "height": height,
         "bboxes": bboxes,
         "labels": labels,
-        "difficults": difficults,
     }
+
+    difficults_u = list(set(difficults))
+    if not (len(difficults_u) == 1 and difficults_u[0] is None):
+        difficults = ",".join(difficults)
+        info["difficults"] = difficults
 
     return info
 
 
 def main(args):
-    root_dir = os.path.abspath(args.src_dir)
-    ann_dir = os.path.join(root_dir, "Annotations")
+    assert len(args.src_dir) == len(args.save_path)
 
-    img_infos = []
-    save_path = args.save_path
+    for src_dir, save_path in zip(args.src_dir, args.save_path):
+        root_dir = os.path.abspath(src_dir)
+        ann_dir = os.path.join(root_dir, "Annotations")
 
-    for filename in tqdm(list(os.listdir(ann_dir))):
-        img_id, _ = os.path.splitext(filename)
-        img_info = read_xml(img_id=img_id, root_dir=root_dir)
-        img_infos.append(img_info)
+        img_infos = []
+        for filename in tqdm(list(os.listdir(ann_dir))):
+            img_id, _ = os.path.splitext(filename)
+            img_info = read_xml(img_id=img_id, root_dir=root_dir)
+            img_infos.append(img_info)
 
-    df = pd.DataFrame.from_records(img_infos)
-    df.to_csv(save_path, index=False)
+        df = pd.DataFrame.from_records(img_infos)
+        df.to_csv(save_path, index=False)
+
     print("Done.")
 
 
@@ -95,12 +103,14 @@ def parse_arguments(argv):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description=DESCRIPTION)
     parser.add_argument(
-        '-d', '--src-dir', type=str, required=True,
-        help='Path to the root directory of the dataset (which usually '
-             'contains folders like "Annotations", "JPEGImages").')
+        '-d', '--src-dir', type=str, required=True, nargs="+",
+        help='Path(s) to the root directory of the dataset (which usually '
+             'contain(s) folders like "Annotations", "JPEGImages"). Multiple '
+             'paths are to be separated by space.')
     parser.add_argument(
-        '-s', '--save-path', type=str, required=True,
-        help='Path to save the dataset information.')
+        '-s', '--save-path', type=str, required=True, nargs="+",
+        help='Path(s) to save the dataset information. Multiple paths are to '
+             'be separated by space.')
 
     return parser.parse_args(argv)
 

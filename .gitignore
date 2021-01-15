@@ -1,0 +1,12 @@
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints
+
+# Training data
+data/
+
+# Python cache
+__pycache__/
+
+# Build
+*.egg-info/

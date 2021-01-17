@@ -9,8 +9,8 @@ from tqdm import tqdm
 
 
 DESCRIPTION = """
-Build a csv file containing necessary information that is compatible with this
-package.
+Build a csv file containing necessary information of a PASCAL VOC dataset that
+is compatible with this package.
 """
 
 

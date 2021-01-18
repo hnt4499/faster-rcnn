@@ -14,6 +14,17 @@ compatible with this package.
 """
 
 
+def get_bbox(bbox):
+    """Get bbox of type (xmin, ymin, xmax, ymax) from a bbox of type
+    (x, y, w, h)"""
+    xmin, ymin, w, h = bbox
+    xmin = round(xmin)
+    ymin = round(ymin)
+    xmax = round(xmin + w) - 1
+    ymax = round(ymin + h) - 1
+    return [xmin, ymin, xmax, ymax]
+
+
 def process_df(df_images, df_objects):
     if df_objects is None:
         df_merge = df_images[["id", "file_name", "width", "height"]]
@@ -25,7 +36,7 @@ def process_df(df_images, df_objects):
                  "file_name", "height", "width"]]
 
         # Convert bboxes to integers
-        df["bbox"] = df["bbox"].apply(lambda x: list(map(round, x)))
+        df["bbox"] = df["bbox"].apply(get_bbox)
 
         # Merge all objects within each image
         def transform(sub_df):

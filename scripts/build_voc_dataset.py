@@ -1,4 +1,5 @@
 import os
+import json
 import xml.etree.ElementTree as ET
 import sys
 import argparse
@@ -81,8 +82,11 @@ def read_xml(img_id, root_dir):
 
 def main(args):
     assert len(args.src_dir) == len(args.save_path)
+    labels = []
+    dfs = []
+    print("Reading annotations...")
 
-    for src_dir, save_path in zip(args.src_dir, args.save_path):
+    for src_dir in args.src_dir:
         root_dir = os.path.abspath(src_dir)
         ann_dir = os.path.join(root_dir, "Annotations")
 
@@ -93,6 +97,28 @@ def main(args):
             img_infos.append(img_info)
 
         df = pd.DataFrame.from_records(img_infos)
+        dfs.append(df)
+        labels.append(df["labels"])
+
+    # Get integer labels
+    labels = pd.concat(labels).apply(lambda x: x.split(","))
+    labels = sum(labels.tolist(), [])
+    labels = list(set(labels))
+    idxs = range(len(labels))
+
+    cls2idx = dict(zip(labels, idxs))
+    idx2cls = dict(zip(idxs, labels))
+    with open(args.mapping_path, "w") as fout:
+        json.dump(
+            {"cls2idx": cls2idx, "idx2cls": idx2cls},
+            fout, indent=2)
+
+    # Convert string labels to integer labels
+    print("Post-processing dataframes...")
+    for df, save_path in zip(dfs, args.save_path):
+        df["labels"] = df["labels"].str.split(",")
+        df["labels"] = df["labels"].apply(
+            lambda x: ",".join([str(cls2idx[i]) for i in x]))
         df.to_csv(save_path, index=False)
 
     print("Done.")
@@ -111,6 +137,10 @@ def parse_arguments(argv):
         '-s', '--save-path', type=str, required=True, nargs="+",
         help='Path(s) to save the dataset information. Multiple paths are to '
              'be separated by space.')
+    parser.add_argument(
+        '-m', '--mapping-path', type=str, required=True,
+        help='Path to save the class mapping (i.e., cls2idx and idx2cls), if '
+             'specified.')
 
     return parser.parse_args(argv)
 

@@ -100,27 +100,37 @@ def main(args):
         dfs.append(df)
         labels.append(df["labels"])
 
-    # Get integer labels
-    labels = pd.concat(labels).apply(lambda x: x.split(","))
-    labels = sum(labels.tolist(), [])
-    labels = list(set(labels))
-    idxs = range(len(labels))
+    if args.mapping_path is not None:
+        if not os.path.isfile(args.mapping_path):
+            # Get integer labels
+            labels = pd.concat(labels).apply(lambda x: x.split(","))
+            labels = sum(labels.tolist(), [])
+            labels = list(set(labels))
+            idxs = range(len(labels))
 
-    cls2idx = dict(zip(labels, idxs))
-    idx2cls = dict(zip(idxs, labels))
-    with open(args.mapping_path, "w") as fout:
-        json.dump(
-            {"cls2idx": cls2idx, "idx2cls": idx2cls},
-            fout, indent=2)
+            cls2idx = dict(zip(labels, idxs))
+            idx2cls = dict(zip(idxs, labels))
+            with open(args.mapping_path, "w") as fout:
+                json.dump(
+                    {"cls2idx": cls2idx, "idx2cls": idx2cls},
+                    fout, indent=2)
+        else:
+            with open(args.mapping_path, "r") as fin:
+                cls2idx = json.load(fin)["cls2idx"]
 
-    # Convert string labels to integer labels
-    print("Post-processing dataframes...")
+        # Convert string labels to integer labels
+        print("Post-processing dataframes...")
+        dfs_ = []
+        for df in dfs:
+            df["labels"] = df["labels"].str.split(",")
+            df["labels"] = df["labels"].apply(
+                lambda x: ",".join([str(cls2idx[i]) for i in x]))
+            dfs_.append(df)
+        dfs = dfs_
+
+    # Save
     for df, save_path in zip(dfs, args.save_path):
-        df["labels"] = df["labels"].str.split(",")
-        df["labels"] = df["labels"].apply(
-            lambda x: ",".join([str(cls2idx[i]) for i in x]))
         df.to_csv(save_path, index=False)
-
     print("Done.")
 
 
@@ -140,7 +150,8 @@ def parse_arguments(argv):
     parser.add_argument(
         '-m', '--mapping-path', type=str, required=True,
         help='Path to save the class mapping (i.e., cls2idx and idx2cls), if '
-             'specified.')
+             'specified. If exists, use this mapping file instead of creating '
+             'a new one.')
 
     return parser.parse_args(argv)
 

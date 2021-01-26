@@ -37,15 +37,16 @@ def train(model, dataloader, optimizer, device, epoch=None, total_epoch=None,
             t.set_description(f"Training ({epoch}/{total_epoch})")
         else:
             t.set_description("Training")
-        for i, (images, bboxes, labels) in enumerate(t):
+        for i, (images, bboxes, labels, image_boundaries) in enumerate(t):
             images = images.to(device)
             bboxes = [bbox.to(device) for bbox in bboxes]
             labels = [label.to(device) for label in labels]
+            image_boundaries = image_boundaries.to(device)
 
             optimizer.zero_grad()
 
             # Forward
-            output = model(images, bboxes, labels)
+            output = model(images, bboxes, labels, image_boundaries)
             loss_cls = output["loss_cls"]
             loss_t = output["loss_t"]
             loss = output["loss"]

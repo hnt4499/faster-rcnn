@@ -41,6 +41,8 @@ model:
     positive_fraction: 0.5
     batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
     reg_lambda: 1.0
+    normalize_offsets: false
+    handle_cross_boundary_boxes: true
 training:
     # Set to `null` to not save anything
     work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/

@@ -89,9 +89,10 @@ class VOCDataset(Dataset):
     def __getitem__(self, index):
         img_info = self.df.iloc[index]
         bboxes, labels, img_path = img_info[["bboxes", "labels", "img_path"]]
+        img_width, img_height = img_info[["width", "height"]]
         with open(img_path, "rb") as f:
             img = Image.open(f).convert("RGB")
-        return img, bboxes, labels
+        return img, bboxes, labels, img_width, img_height
 
 
 def collate_fn(batch, transforms):
@@ -106,32 +107,47 @@ def collate_fn(batch, transforms):
     transforms : callable
         Transformations to be applied on input PIL images.
     """
-    images, bboxess, labelss = zip(*batch)
+    images, bboxess, labelss, img_widths, img_heights = zip(*batch)
+
+    # Turn image widths and heights into pseudo bounding boxes to retrieve back
+    # later
+    img_widths = torch.tensor(img_widths, dtype=torch.float32)
+    img_heights = torch.tensor(img_heights, dtype=torch.float32)
+    x1_or_y1 = torch.zeros_like(img_widths, dtype=torch.float32)
+    pseudo_img_sizes = torch.stack(
+        [x1_or_y1, x1_or_y1, img_widths, img_heights], dim=-1)
 
     # Bounding boxes
     bboxess_ = []
-    for bboxes in bboxess:
+    for bboxes, pseudo_img_size in zip(bboxess, pseudo_img_sizes):
         assert len(bboxes) % 4 == 0
         bboxes = torch.tensor(bboxes, dtype=torch.float32)
         bboxes = bboxes.view(-1, 4)
+        # Concat with (pseudo) image size
+        bboxes = torch.cat((bboxes, pseudo_img_size[None, :]), dim=0)
         bboxess_.append(bboxes)
     bboxess = bboxess_
 
     # Labels
     labelss_ = []
     for labels, bboxes in zip(labelss, bboxess):
-        assert len(labels) == len(bboxes)
+        assert len(labels) == len(bboxes) - 1  # accounts for pseudo image size
         labels = torch.tensor(labels, dtype=torch.float32)
         labelss_.append(labels)
     labelss = labelss_
 
     # Transformations
     images_trans, bboxess_trans, labelss_trans = [], [], []
+    image_boundaries = []
     for image, bboxes, labels in zip(images, bboxess, labelss):
         outp = transforms(image=image, bboxes=bboxes, class_labels=labels)
         images_trans.append(outp["image"])
-        bboxess_trans.append(convert_xyxy_to_xywh(outp["bboxes"]))
         labelss_trans.append(outp["class_labels"])
 
+        bboxes_trans = convert_xyxy_to_xywh(outp["bboxes"])
+        bboxess_trans.append(bboxes_trans[:-1, :])
+        image_boundaries.append(bboxes_trans[-1, :])
+
     images_trans = torch.stack(images_trans, dim=0)
-    return images_trans, bboxess_trans, labelss_trans
+    image_boundaries = torch.stack(image_boundaries, dim=0)
+    return images_trans, bboxess_trans, labelss_trans, image_boundaries

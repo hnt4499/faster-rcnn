@@ -52,6 +52,8 @@ def main(args):
     positive_fraction = model_info["positive_fraction"]
     batch_size_per_image = model_info["batch_size_per_image"]
     reg_lambda = model_info["reg_lambda"]
+    normalize_offsets = model_info["normalize_offsets"]
+    handle_cross_boundary_boxes = model_info["handle_cross_boundary_boxes"]
 
     # Unpack training hyperparameters
     training_info = config["training"]

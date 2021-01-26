@@ -21,13 +21,14 @@ def evaluate(model, dataloader, device, prefix="", testing=False):
     model.eval()
 
     with torch.no_grad():
-        for i, (images, bboxes, labels) in enumerate(dataloader):
+        for i, (images, bboxes, labels, image_boundaries) in \
+                enumerate(dataloader):
             images = images.to(device)
             bboxes = [bbox.to(device) for bbox in bboxes]
             labels = [label.to(device) for label in labels]
 
             # Forward
-            output = model(images, bboxes, labels)
+            output = model(images, bboxes, labels, image_boundaries)
 
             # Break when reaching 10 iterations when testing
             if testing and i == 9:

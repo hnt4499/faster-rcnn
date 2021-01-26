@@ -1,0 +1,60 @@
+data:
+    train:
+        paths:
+            - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_0.csv
+            - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_1.csv
+            - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_2.csv
+            - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_3.csv
+        format: voc
+        kwargs:
+            difficult: false
+    val:
+        paths:
+            - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_4.csv
+        format: voc
+        kwargs:
+            difficult: false
+    test:
+        paths:
+            - /home/jupyter/Documents/projects/faster-rcnn/data/orig/voc2007_test.csv
+        format: voc
+        kwargs:
+            difficult: false
+
+model:
+    backbone: resnet50
+    backbone_freeze_all: true
+    anchor_areas:
+        # - 16384  # 128 * 128
+        # - 65536  # 256 * 256
+        # - 262144  # 512 * 512
+        - 9216  # 96 * 96
+        - 36864  # 192 * 192
+        - 147456  # 384 * 384
+    aspect_ratios:
+        - 0.5
+        - 1.0
+        - 2.0
+    kernel_size: 3
+    num_channels: 512
+    sampler: random_sampler
+    positive_fraction: 0.5
+    batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
+    reg_lambda: 1.0
+training:
+    # Set to `null` to not save anything
+    work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/
+    # The `anchor_areas` and `input_size` are directly dependent of each other
+    input_size: 400
+    transforms_mode: simple  # refer to `faster_rcnn.transforms.get_transforms`
+    device: cuda
+    learning_rate: 0.0001
+    batch_size: 128
+    num_epochs: 1000
+    num_workers: 1
+    # Set to 'true' to perform only 10 iterations per epoch
+    testing: false
+evaluating:
+    evaluate_every: 1000  # iteration interval
+    input_size: 400
+    transforms_mode: simple

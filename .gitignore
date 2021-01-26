@@ -12,4 +12,4 @@ __pycache__/
 *.egg-info/
 
 # Working directory
-work_dirs/
+work_dirs/202*

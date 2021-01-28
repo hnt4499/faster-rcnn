@@ -453,6 +453,9 @@ class RPNModel(nn.Module):
                 image_boundaries = torch.tensor(
                     [0, 0, images.shape[3], images.shape[2]]
                 ).repeat(images.shape[0], 1)  # (B, 4)
+            else:
+                image_boundaries = convert_xywh_to_xyxy(
+                    image_boundaries)  # (B, 4)
 
             assert len(anchor_boxes) == len(image_boundaries) == len(mask_all)
             for anchor_box, image_boundary, mask in \

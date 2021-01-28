@@ -167,7 +167,7 @@ def box_area(boxes, mode):
     xmin, ymin, xmax, ymax = torch.split(boxes, 1, dim=-1)  # box
     boxes_area = (xmax - xmin) * (ymax - ymin)
 
-    return boxes_area
+    return boxes_area.squeeze(-1)
 
 
 def index_argsort(x, index, dim=-1):
@@ -228,9 +228,10 @@ def batched_nms(boxes, scores, iou_threshold):
     Parameters
     ----------
     boxes : torch.Tensor
-        Tensor of shape (B, A, 4), where B is batch size, in the xywh format.
+        List of tensors, each of shape (A, 4), where batch size B is the number
+        of list elements. xywh formatted.
     scores : torch.Tensor
-        Tensor of shape (B, A).
+        List of tensors, each of shape (A,).
     iou_threshold : float
         IoU threshold for NMS.
 
@@ -240,9 +241,9 @@ def batched_nms(boxes, scores, iou_threshold):
         List of tensors of indices to keep for each image in the batch.
     """
     assert len(boxes) == len(scores)
-    boxes = convert_xywh_to_xyxy(boxes)
     keep_idxs = []
     for boxes_per_image, scores_per_image in zip(boxes, scores):
+        boxes_per_image = convert_xywh_to_xyxy(boxes_per_image)
         keep = nms(boxes_per_image, scores_per_image, iou_threshold)
         keep_idxs.append(keep)
     return keep_idxs

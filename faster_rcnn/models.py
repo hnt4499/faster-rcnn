@@ -419,8 +419,8 @@ class RPNModel(nn.Module):
         else:
             # Get top_n before NMS
             _, idxs = torch.topk(
-                preds_cls, k=self.pre_nms_top_n, dim=-1, largest=True,
-                sorted=True)  # (B, N_pre)
+                preds_cls, k=min(self.pre_nms_top_n, preds_cls.shape[-1]),
+                dim=-1, largest=True, sorted=True)  # (B, N_pre)
             anchor_boxes = index_argsort(
                 anchor_boxes, idxs, dim=1)  # (B, N_pre, 4)
             preds_t = index_argsort(preds_t, idxs, dim=1)  # (B, N_pre, 4)
@@ -461,8 +461,9 @@ class RPNModel(nn.Module):
             new_preds_cls = []
             for preds_boxes_per_image, preds_cls_per_image in \
                     zip(preds_boxes, preds_cls):
+                k = min(self.post_nms_top_n, preds_cls_per_image.shape[-1])
                 new_preds_cls_per_image, idxs = torch.topk(
-                    preds_cls_per_image, k=self.post_nms_top_n, dim=-1,
+                    preds_cls_per_image, k=k, dim=-1,
                     largest=True, sorted=True)
                 new_preds_boxes_per_image = preds_boxes_per_image[idxs]
 
@@ -598,7 +599,7 @@ class RPNModel(nn.Module):
         new_boxes = []
         for boxes_per_image, image_boundary in zip(boxes, image_boundaries):
             num_dims = boxes_per_image.ndim
-            xmin, ymin, xmax, ymax = torch.split(boxes, 1, dim=-1)
+            xmin, ymin, xmax, ymax = torch.split(boxes_per_image, 1, dim=-1)
             img_xmin, img_ymin, img_xmax, img_ymax = image_boundary
 
             xmin = torch.clamp(xmin, min=img_xmin, max=img_xmax)
@@ -637,6 +638,11 @@ class RPNModel(nn.Module):
         assert len(boxes) == len(image_boundaries)
         box_areas = box_area(boxes, mode="xywh")  # (B, ...)
         image_areas = box_area(
-            image_boundaries, mode="xywh").expand_as(box_areas)  # (B, ...)
+            image_boundaries, mode="xywh")  # (B,)
+
+        num_dim_to_add = box_areas.ndim - 1
+        new_view = [image_areas.shape[0]] + [1] * num_dim_to_add
+        image_areas = image_areas.view(*new_view).expand_as(box_areas)
+
         mask = (box_areas / image_areas) < self.min_size  # (B, ...)
         return mask

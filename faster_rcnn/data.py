@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
-from faster_rcnn.utils import convert_xyxy_to_xywh
+from faster_rcnn.box_utils import convert_xyxy_to_xywh
 
 
 def get_dataset(name):

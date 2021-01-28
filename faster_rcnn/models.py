@@ -4,11 +4,12 @@ import torch.nn.functional as F
 from torchvision import models
 from torchvision.ops import box_iou
 
-from .utils import (get_anchor_boxes, smooth_l1_loss,
-                    convert_xyxy_to_xywh, convert_xywh_to_xyxy,
-                    convert_coords_to_offsets, convert_offsets_to_coords,
-                    box_area, index_argsort, apply_mask, index_batch,
-                    batched_nms, Matcher)
+from .utils import smooth_l1_loss, index_argsort, apply_mask, index_batch
+from .box_utils import (
+    get_anchor_boxes, convert_xyxy_to_xywh, convert_xywh_to_xyxy,
+    convert_coords_to_offsets, convert_offsets_to_coords,
+    box_area, batched_nms, Matcher
+)
 from .samplers import get_sampler
 
 

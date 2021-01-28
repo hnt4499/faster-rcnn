@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torchvision.ops import nms
 
 
 def get_anchor_boxes(feature_map_size, anchor_areas, aspect_ratios):
@@ -155,6 +156,20 @@ def convert_xyxy_to_xywh(boxes):
     return boxes_xywh
 
 
+def box_area(boxes, mode):
+    if mode not in ["xyxy", "xywh"]:
+        raise ValueError("Invalid mode value. Expected one of "
+                         "['xyxy', 'xywh'], got {} instead".format(mode))
+
+    if mode == "xywh":
+        boxes = convert_xywh_to_xyxy(boxes)
+
+    xmin, ymin, xmax, ymax = torch.split(boxes, 1, dim=-1)  # box
+    boxes_area = (xmax - xmin) * (ymax - ymin)
+
+    return boxes_area
+
+
 def index_argsort(x, index, dim=-1):
     """Multi-indexer over multiple dimensions. The `index` tensor could be, for
     example, result of the `argsort` function. The first n shape of `x` tensor
@@ -195,6 +210,42 @@ def apply_mask(x, mask):
     for x_i, mask_i in zip(x, mask):
         x_masked.append(x_i[~mask_i])
     return x_masked
+
+
+def index_batch(x, idxs):
+    """Index along the batch axis"""
+    assert len(x) == len(idxs)
+    x_indexed = []
+    for x_i, idxs_i in zip(x, idxs):
+        x_indexed.append(x_i[idxs_i])
+    return x_indexed
+
+
+def batched_nms(boxes, scores, iou_threshold):
+    """
+    "Real" batched NMS, allowing input tensors with batch dimension.
+
+    Parameters
+    ----------
+    boxes : torch.Tensor
+        Tensor of shape (B, A, 4), where B is batch size, in the xywh format.
+    scores : torch.Tensor
+        Tensor of shape (B, A).
+    iou_threshold : float
+        IoU threshold for NMS.
+
+    Returns
+    -------
+    keep_idxs : list[Tensor[int]]
+        List of tensors of indices to keep for each image in the batch.
+    """
+    assert len(boxes) == len(scores)
+    boxes = convert_xywh_to_xyxy(boxes)
+    keep_idxs = []
+    for boxes_per_image, scores_per_image in zip(boxes, scores):
+        keep = nms(boxes_per_image, scores_per_image, iou_threshold)
+        keep_idxs.append(keep)
+    return keep_idxs
 
 
 class Matcher:

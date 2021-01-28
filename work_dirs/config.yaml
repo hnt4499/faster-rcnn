@@ -44,19 +44,23 @@ model:
     normalize_offsets: false
     handle_cross_boundary_boxes: true
 training:
-    # Set to `null` to not save anything
-    work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/
-    # The `anchor_areas` and `input_size` are directly dependent of each other
-    input_size: 400
+    work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
+    input_size: 400  # the `anchor_areas` and `input_size` are directly dependent of each other
     transforms_mode: simple  # refer to `faster_rcnn.transforms.get_transforms`
     device: cuda
     learning_rate: 0.0001
     batch_size: 128
     num_epochs: 1000
     num_workers: 1
-    # Set to 'true' to perform only 10 iterations per epoch
-    testing: false
+    testing: false # set to 'true' to perform only 10 iterations per epoch
 evaluating:
     evaluate_every: 1000  # iteration interval
     input_size: 400
     transforms_mode: simple
+    post_process:
+      rpn:  # RPN hyperparameters
+        pre_nms_top_n: 2000  # number of boxes to keep before NMS
+        post_nms_top_n: 100  # number of boxes to keep after NMS
+        nms_iou_threshold: 0.7  # IOU threshold during NMS
+        score_threshold: 0.1  # boxes with objectness score smaller than this will be removed
+        min_size: 0.01  # fraction of box width/height to image width/height

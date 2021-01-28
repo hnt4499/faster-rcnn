@@ -6,9 +6,9 @@ from torchvision.ops import box_iou
 
 from .utils import (get_anchor_boxes, smooth_l1_loss,
                     convert_xyxy_to_xywh, convert_xywh_to_xyxy,
-                    index_argsort, apply_mask,
                     convert_coords_to_offsets, convert_offsets_to_coords,
-                    Matcher)
+                    box_area, index_argsort, apply_mask, index_batch,
+                    batched_nms, Matcher)
 from .samplers import get_sampler
 
 
@@ -198,7 +198,9 @@ class RPNModel(nn.Module):
                  kernel_size=3, num_channels=512, sampler="random_sampler",
                  positive_fraction=0.5, batch_size_per_image=256,
                  reg_lambda=1.0, normalize_offsets=False,
-                 handle_cross_boundary_boxes=False):
+                 handle_cross_boundary_boxes=False,
+                 pre_nms_top_n=2000, post_nms_top_n=100,
+                 nms_iou_threshold=0.7, score_threshold=0.1, min_size=0.01):
         super(RPNModel, self).__init__()
         self.backbone_model = backbone_model
         self.anchor_areas = anchor_areas
@@ -212,6 +214,13 @@ class RPNModel(nn.Module):
         self.reg_lambda = reg_lambda
         self.normalize_offsets = normalize_offsets
         self.handle_cross_boundary_boxes = handle_cross_boundary_boxes
+
+        # Post-processing
+        self.pre_nms_top_n = pre_nms_top_n
+        self.post_nms_top_n = post_nms_top_n
+        self.nms_iou_threshold = nms_iou_threshold
+        self.score_threshold = score_threshold
+        self.min_size = min_size
 
         # Box matcher
         self.box_matcher = Matcher(
@@ -408,27 +417,60 @@ class RPNModel(nn.Module):
             return output
 
         else:
-            # Sort predictions by their scores
-            idxs = torch.argsort(
-                preds_cls, dim=1, descending=True)  # (B, H * W * A)
+            # Get top_n before NMS
+            _, idxs = torch.topk(
+                preds_cls, k=self.pre_nms_top_n, dim=-1, largest=True,
+                sorted=True)  # (B, N_pre)
             anchor_boxes = index_argsort(
-                anchor_boxes, idxs, dim=1)  # (B, H * W * A, 4)
-            preds_t = index_argsort(preds_t, idxs, dim=1)  # (B, H * W * A, 4)
-            preds_cls = index_argsort(preds_cls, idxs, dim=1)  # (B, H * W * A)
+                anchor_boxes, idxs, dim=1)  # (B, N_pre, 4)
+            preds_t = index_argsort(preds_t, idxs, dim=1)  # (B, N_pre, 4)
+            preds_cls = index_argsort(preds_cls, idxs, dim=1)  # (B, N_pre)
 
             # Un-normalize predicted offsets
             preds_t = self._inv_normalize_box_offsets(
-                preds_t)  # (B, H * W * A, 4)
+                preds_t)  # (B, N_pre, 4)
 
             # Convert offsets to coordinates
-            pred_boxes = convert_offsets_to_coords(
-                preds_t, anchor_boxes)  # (B, H * W * A, 4)
+            preds_boxes = convert_offsets_to_coords(
+                preds_t, anchor_boxes)  # (B, N_pre, 4)
             # Clip to feature map boundary
-            pred_boxes = self.clip_boxes_to_image_boundary(
-                pred_boxes, image_boundaries, mode="xywh")  # (B, H * W * A, 4)
+            preds_boxes = self._clip_boxes_to_image_boundary(
+                preds_boxes, image_boundaries, mode="xywh")  # (B, N_pre, 4)
+
+            # Remove small or low scoring boxes; preds_boxes and preds_cls:
+            # lists of size `batch_size`, where each element corresponds
+            # to each image in the batch.
+            mask_small = self._get_small_boxes_mask(
+                preds_boxes, image_boundaries)  # (B, N_pre)
+            mask_low_score = preds_cls < self.score_threshold  # (B, N_pre)
+            mask = mask_small | mask_low_score
+            preds_boxes = apply_mask(preds_boxes, mask)
+            preds_cls = apply_mask(preds_cls, mask)
+
+            # Perform NMS; keep_idxs: list of size `batch_size`, where each
+            # element is a tensor of indices to keep for each image.
+            keep_idxs = batched_nms(
+                preds_boxes, preds_cls, self.nms_iou_threshold)
+            # Index NMS results; preds_boxes and preds_cls are both list of
+            # size `batch_size`, where each element corresponds to each image.
+            preds_boxes = index_batch(preds_boxes, keep_idxs)
+            preds_cls = index_batch(preds_cls, keep_idxs)
+
+            # Limit the number of output predictions per image
+            new_preds_boxes = []
+            new_preds_cls = []
+            for preds_boxes_per_image, preds_cls_per_image in \
+                    zip(preds_boxes, preds_cls):
+                new_preds_cls_per_image, idxs = torch.topk(
+                    preds_cls_per_image, k=self.post_nms_top_n, dim=-1,
+                    largest=True, sorted=True)
+                new_preds_boxes_per_image = preds_boxes_per_image[idxs]
+
+                new_preds_boxes.append(new_preds_boxes_per_image)
+                new_preds_cls.append(new_preds_cls_per_image)
 
             output = {
-                "pred_boxes": pred_boxes, "pred_probs": preds_cls
+                "preds_boxes": new_preds_boxes, "preds_probs": new_preds_cls
             }
 
         return output
@@ -526,7 +568,7 @@ class RPNModel(nn.Module):
 
         return labels, matched_gt_boxes
 
-    def clip_boxes_to_image_boundary(self, boxes, image_boundaries, mode):
+    def _clip_boxes_to_image_boundary(self, boxes, image_boundaries, mode):
         """Clip boxes to image boundary.
 
         Parameters
@@ -573,3 +615,28 @@ class RPNModel(nn.Module):
             new_boxes.append(new_boxes_per_image)
 
         return torch.stack(new_boxes, dim=0)
+
+    def _get_small_boxes_mask(self, boxes, image_boundaries):
+        """Get mask to filter small boxes.
+
+        Parameters
+        ----------
+        boxes : torch.Tensor
+            Tensor of shape (B, ..., 4), where `...` could be any of number of
+            dimensions. xywh formatted.
+        image_boundaries : torch.Tensor
+            Tensor of shape (B, 4) representing the original image boundaries
+            as bounding boxes in the transformed batch.
+
+        Returns
+        -------
+        mask : torch.Tensor
+            A mask indicating whether each box should be filtered out or not.
+            Shaped (B, ...), where `...` corresponds to that of `boxes`.
+        """
+        assert len(boxes) == len(image_boundaries)
+        box_areas = box_area(boxes, mode="xywh")  # (B, ...)
+        image_areas = box_area(
+            image_boundaries, mode="xywh").expand_as(box_areas)  # (B, ...)
+        mask = (box_areas / image_areas) < self.min_size  # (B, ...)
+        return mask

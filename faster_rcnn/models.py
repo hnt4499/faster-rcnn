@@ -6,7 +6,7 @@ from torchvision.ops import box_iou
 
 from .utils import (get_anchor_boxes, smooth_l1_loss,
                     convert_xyxy_to_xywh, convert_xywh_to_xyxy,
-                    index_argsort,
+                    index_argsort, apply_mask,
                     convert_coords_to_offsets, convert_offsets_to_coords,
                     Matcher)
 from .samplers import get_sampler
@@ -351,9 +351,9 @@ class RPNModel(nn.Module):
             # Apply mask; each of the resulting objects is a list of size
             # `batch_size`, where each i-th element if either of shape (A_i,)
             # or (A_i, 4) where A_i is the number of valid anchor boxes.
-            anchor_boxes = self._apply_mask(anchor_boxes, valid_anchor_mask)
-            preds_t = self._apply_mask(preds_t, valid_anchor_mask)
-            preds_cls = self._apply_mask(preds_cls, valid_anchor_mask)
+            anchor_boxes = apply_mask(anchor_boxes, valid_anchor_mask)
+            preds_t = apply_mask(preds_t, valid_anchor_mask)
+            preds_cls = apply_mask(preds_cls, valid_anchor_mask)
 
             # Map each groundtruth with its corresponding anchor box(es)
             # labels: list of size `batch_size`, where each element is of shape
@@ -470,15 +470,6 @@ class RPNModel(nn.Module):
             all_masks = mask_all
 
         return all_masks
-
-    @staticmethod
-    def _apply_mask(x, mask):
-        """Apply mask along the batch axis"""
-        assert len(x) == len(mask)
-        x_masked = []
-        for x_i, mask_i in zip(x, mask):
-            x_masked.append(x_i[~mask_i])
-        return x_masked
 
     def _label_anchors(self, gt_boxes, anchor_boxes):
         """Label anchors as positive or negative or "ignored" given the

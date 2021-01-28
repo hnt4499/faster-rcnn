@@ -188,6 +188,15 @@ def index_argsort(x, index, dim=-1):
     return x
 
 
+def apply_mask(x, mask):
+    """Apply mask along the batch axis"""
+    assert len(x) == len(mask)
+    x_masked = []
+    for x_i, mask_i in zip(x, mask):
+        x_masked.append(x_i[~mask_i])
+    return x_masked
+
+
 class Matcher:
     """
     Adapted from

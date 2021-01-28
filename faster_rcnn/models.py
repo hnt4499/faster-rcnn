@@ -4,8 +4,9 @@ import torch.nn.functional as F
 from torchvision import models
 from torchvision.ops import box_iou
 
-from .utils import (get_anchor_boxes, smooth_l1_loss, convert_xywh_to_xyxy,
-                    clip_boxes_to_image_boundary, index_argsort,
+from .utils import (get_anchor_boxes, smooth_l1_loss,
+                    convert_xyxy_to_xywh, convert_xywh_to_xyxy,
+                    index_argsort,
                     convert_coords_to_offsets, convert_offsets_to_coords,
                     Matcher)
 from .samplers import get_sampler
@@ -336,10 +337,17 @@ class RPNModel(nn.Module):
         anchor_boxes = anchor_boxes.repeat(
             batch_size, 1, 1)  # (B, H * W * A, 4)
 
+        # This will be used if `handle_cross_boundary_boxes` is True
+        if image_boundaries is None:
+            image_boundaries = torch.tensor(
+                [0, 0, inp.shape[3], inp.shape[2]]
+            ).repeat(inp.shape[0], 1)  # (B, 4)
+            image_boundaries = convert_xyxy_to_xywh(image_boundaries)  # (B, 4)
+
         if training:
             # Get a mask to filter out-of-image (cross_boundary) anchor boxes
             valid_anchor_mask = self._filter_anchors(
-                anchor_boxes, inp, image_boundaries, training=True)
+                anchor_boxes, image_boundaries, training=True)
             # Apply mask; each of the resulting objects is a list of size
             # `batch_size`, where each i-th element if either of shape (A_i,)
             # or (A_i, 4) where A_i is the number of valid anchor boxes.
@@ -416,10 +424,8 @@ class RPNModel(nn.Module):
             pred_boxes = convert_offsets_to_coords(
                 preds_t, anchor_boxes)  # (B, H * W * A, 4)
             # Clip to feature map boundary
-            pred_boxes = clip_boxes_to_image_boundary(
-                pred_boxes, fm_width, fm_height, mode="xywh")
-            # Scale back to original input size
-            pred_boxes = self.scale_fm_to_input(pred_boxes)
+            pred_boxes = self.clip_boxes_to_image_boundary(
+                pred_boxes, image_boundaries, mode="xywh")  # (B, H * W * A, 4)
 
             output = {
                 "pred_boxes": pred_boxes, "pred_probs": preds_cls
@@ -427,8 +433,7 @@ class RPNModel(nn.Module):
 
         return output
 
-    def _filter_anchors(self, anchor_boxes, images, image_boundaries,
-                        training):
+    def _filter_anchors(self, anchor_boxes, image_boundaries, training):
         """Get mask with True indicating anchor boxes to ignore and False
         indicating anchor boxes to keep.
 
@@ -449,13 +454,8 @@ class RPNModel(nn.Module):
             all_masks = []
             anchor_boxes = convert_xywh_to_xyxy(
                 anchor_boxes)  # (B, H * W * A, 4)
-            if image_boundaries is None:
-                image_boundaries = torch.tensor(
-                    [0, 0, images.shape[3], images.shape[2]]
-                ).repeat(images.shape[0], 1)  # (B, 4)
-            else:
-                image_boundaries = convert_xywh_to_xyxy(
-                    image_boundaries)  # (B, 4)
+            image_boundaries = convert_xywh_to_xyxy(
+                image_boundaries)  # (B, 4)
 
             assert len(anchor_boxes) == len(image_boundaries) == len(mask_all)
             for anchor_box, image_boundary, mask in \
@@ -534,3 +534,51 @@ class RPNModel(nn.Module):
             matched_gt_boxes.append(matched_gt_boxes_per_image)
 
         return labels, matched_gt_boxes
+
+    def clip_boxes_to_image_boundary(self, boxes, image_boundaries, mode):
+        """Clip boxes to image boundary.
+
+        Parameters
+        ----------
+        boxes : torch.Tensor
+            Tensor of shape (B, ..., 4), where `...` could be any of number of
+            dimensions.
+        image_boundaries : torch.Tensor
+            Tensor of shape (B, 4) representing the original image boundaries
+            as bounding boxes in the transformed batch.
+        mode : str
+            Either "xyxy" or "xywh", denote the how the boxes are represented.
+        """
+        if not self.handle_cross_boundary_boxes:
+            return boxes
+
+        if mode not in ["xyxy", "xywh"]:
+            raise ValueError("Invalid mode value. Expected one of "
+                             "['xyxy', 'xywh'], got {} instead".format(mode))
+
+        if mode == "xywh":
+            # Convert to xyxy
+            boxes = convert_xywh_to_xyxy(boxes)
+            image_boundaries = convert_xywh_to_xyxy(image_boundaries)
+        assert len(boxes) == len(image_boundaries)
+        # Clip
+        new_boxes = []
+        for boxes_per_image, image_boundary in zip(boxes, image_boundaries):
+            num_dims = boxes_per_image.ndim
+            xmin, ymin, xmax, ymax = torch.split(boxes, 1, dim=-1)
+            img_xmin, img_ymin, img_xmax, img_ymax = image_boundary
+
+            xmin = torch.clamp(xmin, min=img_xmin, max=img_xmax)
+            ymin = torch.clamp(ymin, min=img_ymin, max=img_ymax)
+            xmax = torch.clamp(xmax, min=img_xmin, max=img_xmax)
+            ymax = torch.clamp(ymax, min=img_ymin, max=img_ymax)
+
+            # Convert back
+            new_boxes_per_image = torch.cat(
+                [xmin, ymin, xmax, ymax], dim=num_dims - 1)
+            if mode == "xywh":
+                new_boxes_per_image = convert_xyxy_to_xywh(new_boxes_per_image)
+
+            new_boxes.append(new_boxes_per_image)
+
+        return torch.stack(new_boxes, dim=0)

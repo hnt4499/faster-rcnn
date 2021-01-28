@@ -155,41 +155,6 @@ def convert_xyxy_to_xywh(boxes):
     return boxes_xywh
 
 
-def clip_boxes_to_image_boundary(boxes, img_width, img_height, mode):
-    """Clip boxes to image boundary.
-
-    Parameters
-    ----------
-    boxes : torch.Tensor
-        Tensor of shape (..., 4).
-    img_width : int or float
-    img_height : int or float
-    mode : str
-        Either "xyxy" or "xywh", denote the how the boxes are represented.
-    """
-    if mode not in ["xyxy", "xywh"]:
-        raise ValueError("Invalid mode value. Expected one of "
-                         "['xyxy', 'xywh'], got {} instead".format(mode))
-
-    if mode == "xywh":
-        # Convert to xyxy
-        boxes = convert_xywh_to_xyxy(boxes)
-    # Clip
-    num_dims = boxes.ndim
-    xmin, ymin, xmax, ymax = torch.split(boxes, 1, dim=-1)
-    xmin = torch.clamp(xmin, min=0, max=img_width)
-    ymin = torch.clamp(ymin, min=0, max=img_height)
-    xmax = torch.clamp(xmax, min=0, max=img_width)
-    ymax = torch.clamp(ymax, min=0, max=img_height)
-
-    # Convert back
-    boxes = torch.cat([xmin, ymin, xmax, ymax], dim=num_dims - 1)
-    if mode == "xywh":
-        boxes = convert_xyxy_to_xywh(boxes)
-
-    return boxes
-
-
 def index_argsort(x, index, dim=-1):
     """Multi-indexer over multiple dimensions. The `index` tensor could be, for
     example, result of the `argsort` function. The first n shape of `x` tensor

@@ -56,7 +56,7 @@ training:
     metrics:
         rpn:
             BoxRecall: {iou_threshold: 0.5}
-            # MABO: {}
+            MeanAverageBestOverlap: {}
             # dr_win_curve: {}
 evaluating:
     evaluate_every: 1000  # iteration interval

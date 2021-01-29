@@ -1,5 +1,6 @@
 import inspect
 
+import torch
 from torchvision.ops import box_iou
 
 
@@ -72,7 +73,7 @@ class BoxRecall(BaseMetric):
         super(BoxRecall, self).__init__()
         self.iou_threshold = iou_threshold
 
-    def call(self, gt_boxes, pred_boxes, pred_objectness, iou_matrices=None):
+    def call(self, gt_boxes, pred_boxes, iou_matrices=None):
         """Calculate box recall for class-agnostic task."""
         assert len(gt_boxes) == len(pred_boxes)
         if iou_matrices is None:
@@ -80,8 +81,7 @@ class BoxRecall(BaseMetric):
                 box_iou(gt_boxes_i, pred_boxes_i) for
                 gt_boxes_i, pred_boxes_i in zip(gt_boxes, pred_boxes)
             ]
-            return self(gt_boxes, pred_boxes, pred_objectness,
-                        iou_matrices=iou_matrices)
+            return self.call(gt_boxes, pred_boxes, iou_matrices=iou_matrices)
 
         tot_boxes = 0
         tot_detected_boxes = 0
@@ -97,6 +97,57 @@ class BoxRecall(BaseMetric):
 
     def get_str(self):
         return f"recall: {self.last_value:.4f}"
+
+
+@register_metric
+class MeanAverageBestOverlap(BaseMetric):
+    """Calculate mean average best overlap (MABO).
+
+    Reference:
+        Uijlings, J. R. R., van de Sande, K. E. A., Gevers, T., & Smeulders,
+        A. W. M. (2013). Selective Search for Object Recognition. International
+        Journal of Computer Vision, 104(2), 154–171.
+    """
+    def __init__(self):
+        super(MeanAverageBestOverlap, self).__init__()
+
+    def call(self, gt_boxes, gt_labels, pred_boxes, iou_matrices=None):
+        """Calculate box recall for class-agnostic task."""
+        assert len(gt_boxes) == len(pred_boxes)
+        if iou_matrices is None:
+            iou_matrices = [
+                box_iou(gt_boxes_i, pred_boxes_i) for
+                gt_boxes_i, pred_boxes_i in zip(gt_boxes, pred_boxes)
+            ]
+            return self.call(gt_boxes, gt_labels, pred_boxes,
+                             iou_matrices=iou_matrices)
+
+        best_overlaps = []
+        for iou_matrix in iou_matrices:
+            best_overlap, _ = iou_matrix.max(dim=-1)
+            best_overlaps.append(best_overlap)
+
+        best_overlaps = torch.cat(best_overlaps)
+        gt_labels = torch.cat(gt_labels).to(torch.int16)
+
+        # Sort
+        gt_labels, sort_idxs = torch.sort(gt_labels)
+        best_overlaps = best_overlaps[sort_idxs]
+
+        # Since tensors are sorted, we can use `unique_consecutive` here
+        _, counts = torch.unique_consecutive(gt_labels, return_counts=True)
+        start = 0
+        mabo = []
+        for c in counts:
+            end = start + c
+            abo = best_overlaps[start:end].mean()
+            mabo.append(abo)
+            start = end
+
+        return sum(mabo) / len(mabo)
+
+    def get_str(self):
+        return f"mABO: {self.last_value:.4f}"
 
 
 class MetricHolder:

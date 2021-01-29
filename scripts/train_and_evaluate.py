@@ -103,6 +103,7 @@ def main(args):
     else:
         save_dir = os.path.realpath(resume_from)
         assert os.path.exists(save_dir)
+    training_info["save_dir"] = save_dir
 
     # Get logger
     logger.remove()  # remove default handler

@@ -257,7 +257,10 @@ class DRWinCurve(BaseMetric):
 
     def _plot(self, x, y, label):
         # Save path
-        save_dir = self.config["training"]["work_dir"]
+        save_dir = self.config["training"]["save_dir"]
+        if save_dir is None:
+            return
+
         save_path = os.path.join(save_dir, f"DRWinCurve_{self.curr_i}.jpg")
         self.curr_i += 1
 

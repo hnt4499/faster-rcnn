@@ -12,7 +12,8 @@ def register_metric(func):
 
 
 class BaseRPNMetric:
-    """Base class for all metrics."""
+    """Base class for all metrics. Note that all metrics expect boxes in xyxy
+    format."""
     def __init__(self):
         self.last_value = None
 

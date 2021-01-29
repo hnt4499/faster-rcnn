@@ -63,3 +63,8 @@ def index_batch(x, idxs):
     for x_i, idxs_i in zip(x, idxs):
         x_indexed.append(x_i[idxs_i])
     return x_indexed
+
+
+def batching(function, inp):
+    """Apply a function along the batch axis"""
+    return [function(inp_i) for inp_i in inp]

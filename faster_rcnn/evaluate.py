@@ -1,6 +1,9 @@
 import torch
 from loguru import logger
 
+from .box_utils import convert_xywh_to_xyxy
+from .utils import batching
+
 
 def evaluate(model, dataloader, device, prefix="", testing=False,
              rpn_metrics=None):
@@ -44,6 +47,8 @@ def evaluate(model, dataloader, device, prefix="", testing=False,
             if testing and i == 9:
                 break
 
+    tot_gt_boxes = batching(convert_xywh_to_xyxy, tot_gt_boxes)
+    tot_preds_boxes = batching(convert_xywh_to_xyxy, tot_preds_boxes)
     rpn_metrics(tot_gt_boxes, tot_preds_boxes, tot_preds_scores)
     results = ", ".join(rpn_metrics.get_str())
     logger.info(f"{prefix}{results}")

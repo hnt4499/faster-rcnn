@@ -17,6 +17,7 @@ from faster_rcnn.train import train
 from faster_rcnn.evaluate import evaluate
 from faster_rcnn.data import get_dataset, collate_fn
 from faster_rcnn.transforms import get_transforms
+from faster_rcnn.metrics import RPNMetric
 
 
 DESCRIPTION = """Train and evaluate a Faster R-CNN model."""
@@ -68,6 +69,10 @@ def main(args):
     num_epochs = training_info["num_epochs"]
     num_workers = training_info["num_workers"]
     testing = training_info.get("testing", False)
+
+    # Metrics
+    metrics_info = training_info["metrics"]
+    rpn_metrics = RPNMetric(metrics_info["rpn"])
 
     # Unpack evaluating hyperparameters
     evaluate_info = config["evaluating"]
@@ -212,7 +217,7 @@ def main(args):
 
         evaluator = partial(
             evaluate, dataloader=dataloaders["val"],
-            device=device, testing=testing)
+            device=device, testing=testing, rpn_metrics=rpn_metrics)
 
         # Train
         train(
@@ -223,7 +228,7 @@ def main(args):
         # Evaluate
         evaluator(
             model=rpn_model,
-            prefix=f"[Validation (epoch: {epoch}/{num_epochs})] ")
+            prefix=f"Validation (epoch: {epoch}/{num_epochs}): ")
 
         # Save model
         if save_dir is not None:
@@ -234,7 +239,7 @@ def main(args):
 
     # Test
     evaluate(
-        rpn_model, dataloaders["test"], device, prefix="[Test] ")
+        rpn_model, dataloaders["test"], device, prefix="Test: ")
     logger.info("Training finished.")
 
 

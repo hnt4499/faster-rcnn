@@ -23,7 +23,7 @@ data:
 
 model:
     backbone: resnet50
-    backbone_freeze_all: true
+    backbone_freeze_all: false
     anchor_areas:
         # - 16384  # 128 * 128
         # - 65536  # 256 * 256
@@ -49,18 +49,23 @@ training:
     transforms_mode: simple  # refer to `faster_rcnn.transforms.get_transforms`
     device: cuda
     learning_rate: 0.0001
-    batch_size: 128
+    batch_size: 16
     num_epochs: 1000
     num_workers: 1
-    testing: false # set to 'true' to perform only 10 iterations per epoch
+    testing: false  # set to 'true' to perform only 10 iterations per epoch
+    metrics:
+        rpn:
+            BoxRecall: {iou_threshold: 0.5}
+            # MABO: {}
+            # dr_win_curve: {}
 evaluating:
     evaluate_every: 1000  # iteration interval
     input_size: 400
     transforms_mode: simple
     post_process:
-      rpn:  # RPN hyperparameters
-        pre_nms_top_n: 2000  # number of boxes to keep before NMS
-        post_nms_top_n: 100  # number of boxes to keep after NMS
-        nms_iou_threshold: 0.7  # IOU threshold during NMS
-        score_threshold: 0.1  # boxes with objectness score smaller than this will be removed
-        min_size: 0.01  # fraction of box width/height to image width/height
+        rpn:  # RPN hyperparameters
+            pre_nms_top_n: 2000  # number of boxes to keep before NMS
+            post_nms_top_n: 500  # number of boxes to keep after NMS
+            nms_iou_threshold: 0.7  # IOU threshold during NMS
+            score_threshold: 0.1  # boxes with objectness score smaller than this will be removed
+            min_size: 0.01  # fraction of box width/height to image width/height

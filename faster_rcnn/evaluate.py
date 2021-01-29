@@ -1,7 +1,9 @@
 import torch
+from loguru import logger
 
 
-def evaluate(model, dataloader, device, prefix="", testing=False):
+def evaluate(model, dataloader, device, prefix="", testing=False,
+             rpn_metrics=None):
     """Evaluate the trained model.
 
     Parameters
@@ -19,6 +21,9 @@ def evaluate(model, dataloader, device, prefix="", testing=False):
         batch sizes, etc. (default: False)
     """
     model.eval()
+    tot_gt_boxes = []
+    tot_preds_boxes = []
+    tot_preds_scores = []
 
     with torch.no_grad():
         for i, (images, bboxes, labels, image_boundaries) in \
@@ -29,11 +34,19 @@ def evaluate(model, dataloader, device, prefix="", testing=False):
             image_boundaries = image_boundaries.to(device)
 
             # Forward
-            output = model(images, bboxes, labels, image_boundaries)
+            output = model(images, gt_boxes=None, labels=None,
+                           image_boundaries=image_boundaries)
+            tot_gt_boxes.extend(bboxes)
+            tot_preds_boxes.extend(output["preds_boxes"])
+            tot_preds_scores.extend(output["preds_probs"])
 
             # Break when reaching 10 iterations when testing
             if testing and i == 9:
                 break
+
+    rpn_metrics(tot_gt_boxes, tot_preds_boxes, tot_preds_scores)
+    results = ", ".join(rpn_metrics.get_str())
+    logger.info(f"{prefix}{results}")
 
     model.train()
     return

@@ -17,7 +17,7 @@ from faster_rcnn.train import train
 from faster_rcnn.evaluate import evaluate
 from faster_rcnn.data import get_dataset, collate_fn
 from faster_rcnn.transforms import get_transforms
-from faster_rcnn.metrics import RPNMetric
+from faster_rcnn.metrics import MetricHolder
 
 
 DESCRIPTION = """Train and evaluate a Faster R-CNN model."""
@@ -72,7 +72,7 @@ def main(args):
 
     # Metrics
     metrics_info = training_info["metrics"]
-    rpn_metrics = RPNMetric(metrics_info["rpn"])
+    rpn_metrics = MetricHolder(metrics_info["rpn"])
 
     # Unpack evaluating hyperparameters
     evaluate_info = config["evaluating"]

@@ -25,8 +25,9 @@ def evaluate(model, dataloader, device, prefix="", testing=False,
     """
     model.eval()
     tot_gt_boxes = []
-    tot_preds_boxes = []
-    tot_preds_scores = []
+    tot_gt_labels = []
+    tot_pred_boxes = []
+    tot_pred_objectness = []
 
     with torch.no_grad():
         for i, (images, bboxes, labels, image_boundaries) in \
@@ -40,16 +41,18 @@ def evaluate(model, dataloader, device, prefix="", testing=False,
             output = model(images, gt_boxes=None, labels=None,
                            image_boundaries=image_boundaries)
             tot_gt_boxes.extend(bboxes)
-            tot_preds_boxes.extend(output["preds_boxes"])
-            tot_preds_scores.extend(output["preds_probs"])
+            tot_gt_labels.extend(labels)
+            tot_pred_boxes.extend(output["pred_boxes"])
+            tot_pred_objectness.extend(output["pred_probs"])
 
             # Break when reaching 10 iterations when testing
             if testing and i == 9:
                 break
 
     tot_gt_boxes = batching(convert_xywh_to_xyxy, tot_gt_boxes)
-    tot_preds_boxes = batching(convert_xywh_to_xyxy, tot_preds_boxes)
-    rpn_metrics(tot_gt_boxes, tot_preds_boxes, tot_preds_scores)
+    tot_pred_boxes = batching(convert_xywh_to_xyxy, tot_pred_boxes)
+    rpn_metrics(tot_gt_boxes, tot_gt_labels, tot_pred_boxes,
+                tot_pred_objectness, pred_classes=None)
     results = ", ".join(rpn_metrics.get_str())
     logger.info(f"{prefix}{results}")
 

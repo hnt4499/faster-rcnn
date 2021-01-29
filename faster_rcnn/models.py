@@ -330,11 +330,11 @@ class RPNModel(nn.Module):
 
         # Feed forward; `A` denotes the number of anchor boxes at each
         # receptive point.
-        preds_t = self.box_regression(feature_map)  # (B, A * 4, H, W)
-        preds_t = preds_t.permute(0, 2, 3, 1).reshape(
+        pred_t = self.box_regression(feature_map)  # (B, A * 4, H, W)
+        pred_t = pred_t.permute(0, 2, 3, 1).reshape(
             batch_size, -1, 4)  # (B, H * W * A, 4)
-        preds_cls = self.cls_probs(feature_map)  # (B, A, H, W)
-        preds_cls = self.sigmoid(preds_cls).permute(0, 2, 3, 1).reshape(
+        pred_cls = self.cls_probs(feature_map)  # (B, A, H, W)
+        pred_cls = self.sigmoid(pred_cls).permute(0, 2, 3, 1).reshape(
             batch_size, -1)  # (B, H * W * A)
 
         # Get anchor boxes for this feature map
@@ -362,9 +362,9 @@ class RPNModel(nn.Module):
             # Get a mask to filter images whose anchor boxes are all invalid
             batch_mask = self._get_batch_mask(valid_anchor_mask)  # (B,)
             # Filter images whose anchor boxes are all invalid
-            anchor_boxes, preds_t, preds_cls, valid_anchor_mask = [
+            anchor_boxes, pred_t, pred_cls, valid_anchor_mask = [
                 tensor[~batch_mask] for tensor in
-                [anchor_boxes, preds_t, preds_cls, valid_anchor_mask]
+                [anchor_boxes, pred_t, pred_cls, valid_anchor_mask]
             ]
             gt_boxes = [
                 gt_box for gt_box, m in zip(gt_boxes, batch_mask) if not m]
@@ -372,9 +372,9 @@ class RPNModel(nn.Module):
             # is a list of size `batch_size'`, where `batch_size'` <=
             # `batch_size`, and where each i-th element if either of shape
             # (A_i,) or (A_i, 4) where A_i is the number of valid anchor boxes.
-            anchor_boxes, preds_t, preds_cls = [
+            anchor_boxes, pred_t, pred_cls = [
                 apply_mask(tensor, valid_anchor_mask) for tensor in
-                [anchor_boxes, preds_t, preds_cls]
+                [anchor_boxes, pred_t, pred_cls]
             ]
 
             # Map each groundtruth with its corresponding anchor box(es)
@@ -410,17 +410,17 @@ class RPNModel(nn.Module):
 
             labels = torch.cat(labels, dim=0)  # (Σ A_i,)
             gt_t = torch.cat(gt_t, dim=0)  # (Σ A_i, 4)
-            preds_cls = torch.cat(preds_cls, dim=0)  # (Σ A_i,)
-            preds_t = torch.cat(preds_t, dim=0)  # (Σ A_i, 4)
+            pred_cls = torch.cat(pred_cls, dim=0)  # (Σ A_i,)
+            pred_t = torch.cat(pred_t, dim=0)  # (Σ A_i, 4)
 
             loss_regression = smooth_l1_loss(
-                preds_t[sampled_pos_inds],
+                pred_t[sampled_pos_inds],
                 gt_t[sampled_pos_inds],
                 beta=1 / 9,
                 size_average=False,
             ) / (sampled_inds.numel())
             loss_cls = F.binary_cross_entropy_with_logits(
-                preds_cls[sampled_inds], labels[sampled_inds]
+                pred_cls[sampled_inds], labels[sampled_inds]
             )
             loss = loss_cls + self.reg_lambda * loss_regression
 
@@ -432,59 +432,59 @@ class RPNModel(nn.Module):
         else:
             # Get top_n before NMS
             _, idxs = torch.topk(
-                preds_cls, k=min(self.pre_nms_top_n, preds_cls.shape[-1]),
+                pred_cls, k=min(self.pre_nms_top_n, pred_cls.shape[-1]),
                 dim=-1, largest=True, sorted=True)  # (B, N_pre)
             anchor_boxes = index_argsort(
                 anchor_boxes, idxs, dim=1)  # (B, N_pre, 4)
-            preds_t = index_argsort(preds_t, idxs, dim=1)  # (B, N_pre, 4)
-            preds_cls = index_argsort(preds_cls, idxs, dim=1)  # (B, N_pre)
+            pred_t = index_argsort(pred_t, idxs, dim=1)  # (B, N_pre, 4)
+            pred_cls = index_argsort(pred_cls, idxs, dim=1)  # (B, N_pre)
 
             # Un-normalize predicted offsets
-            preds_t = self._inv_normalize_box_offsets(
-                preds_t)  # (B, N_pre, 4)
+            pred_t = self._inv_normalize_box_offsets(
+                pred_t)  # (B, N_pre, 4)
 
             # Convert offsets to coordinates
-            preds_boxes = convert_offsets_to_coords(
-                preds_t, anchor_boxes)  # (B, N_pre, 4)
+            pred_boxes = convert_offsets_to_coords(
+                pred_t, anchor_boxes)  # (B, N_pre, 4)
             # Clip to feature map boundary
-            preds_boxes = self._clip_boxes_to_image_boundary(
-                preds_boxes, image_boundaries, mode="xywh")  # (B, N_pre, 4)
+            pred_boxes = self._clip_boxes_to_image_boundary(
+                pred_boxes, image_boundaries, mode="xywh")  # (B, N_pre, 4)
 
-            # Remove small or low scoring boxes; preds_boxes and preds_cls:
+            # Remove small or low scoring boxes; pred_boxes and pred_cls:
             # lists of size `batch_size`, where each element corresponds
             # to each image in the batch.
             mask_small = self._get_small_boxes_mask(
-                preds_boxes, image_boundaries)  # (B, N_pre)
-            mask_low_score = preds_cls < self.score_threshold  # (B, N_pre)
+                pred_boxes, image_boundaries)  # (B, N_pre)
+            mask_low_score = pred_cls < self.score_threshold  # (B, N_pre)
             mask = mask_small | mask_low_score
-            preds_boxes = apply_mask(preds_boxes, mask)
-            preds_cls = apply_mask(preds_cls, mask)
+            pred_boxes = apply_mask(pred_boxes, mask)
+            pred_cls = apply_mask(pred_cls, mask)
 
             # Perform NMS; keep_idxs: list of size `batch_size`, where each
             # element is a tensor of indices to keep for each image.
             keep_idxs = batched_nms(
-                preds_boxes, preds_cls, self.nms_iou_threshold)
-            # Index NMS results; preds_boxes and preds_cls are both list of
+                pred_boxes, pred_cls, self.nms_iou_threshold)
+            # Index NMS results; pred_boxes and pred_cls are both list of
             # size `batch_size`, where each element corresponds to each image.
-            preds_boxes = index_batch(preds_boxes, keep_idxs)
-            preds_cls = index_batch(preds_cls, keep_idxs)
+            pred_boxes = index_batch(pred_boxes, keep_idxs)
+            pred_cls = index_batch(pred_cls, keep_idxs)
 
             # Limit the number of output predictions per image
-            new_preds_boxes = []
-            new_preds_cls = []
-            for preds_boxes_per_image, preds_cls_per_image in \
-                    zip(preds_boxes, preds_cls):
-                k = min(self.post_nms_top_n, preds_cls_per_image.shape[-1])
-                new_preds_cls_per_image, idxs = torch.topk(
-                    preds_cls_per_image, k=k, dim=-1,
+            new_pred_boxes = []
+            new_pred_cls = []
+            for pred_boxes_per_image, pred_cls_per_image in \
+                    zip(pred_boxes, pred_cls):
+                k = min(self.post_nms_top_n, pred_cls_per_image.shape[-1])
+                new_pred_cls_per_image, idxs = torch.topk(
+                    pred_cls_per_image, k=k, dim=-1,
                     largest=True, sorted=True)
-                new_preds_boxes_per_image = preds_boxes_per_image[idxs]
+                new_pred_boxes_per_image = pred_boxes_per_image[idxs]
 
-                new_preds_boxes.append(new_preds_boxes_per_image)
-                new_preds_cls.append(new_preds_cls_per_image)
+                new_pred_boxes.append(new_pred_boxes_per_image)
+                new_pred_cls.append(new_pred_cls_per_image)
 
             output = {
-                "preds_boxes": new_preds_boxes, "preds_probs": new_preds_cls
+                "pred_boxes": new_pred_boxes, "pred_probs": new_pred_cls
             }
 
         return output

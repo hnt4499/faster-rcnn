@@ -1,3 +1,5 @@
+import inspect
+
 from torchvision.ops import box_iou
 
 
@@ -11,20 +13,43 @@ def register_metric(func):
     return func
 
 
-class BaseRPNMetric:
+class BaseMetric:
     """Base class for all metrics. Note that all metrics expect boxes in xyxy
     format."""
     def __init__(self):
         self.last_value = None
 
-    def call(self, groundtruths, predictions, predictions_score,
-             iou_matrices=None):
+    def call(self, gt_boxes, gt_labels, pred_boxes, pred_objectness,
+             pred_classes, iou_matrices=None):
+        """Calculate metric. All inherited classes must follow this parameter
+        call.
+
+        Parameters
+        ----------
+        gt_boxes : list[Tensor]
+            List of groundtruth boxes of size `batch_size`. Each element is a
+            tensor of shape (M, 4).
+        gt_labels : list[Tensor]
+            List of groundtruth labels of size `batch_size`. Each element is a
+            tensor of shape (M,).
+        pred_boxes : list[Tensor]
+            List of predictions of size `batch_size`. Each element is a tensor
+            of shape (N, 4).
+        pred_objectness : list[Tensor]
+            Objectness scores (e.g., output of RPN model) corresponding to
+            each prediction in `pred_boxes` tensor. List of size `batch_size`,
+            where each element is a tensor of shape (N,).
+        pred_classes : list[Tensor]
+            Predicted classes (e.g., output of Fast R-CNN model) corresponding
+            to each prediction in `pred_boxes` tensor. List of size
+            `batch_size`, where each element is a tensor of shape (N,).
+        iou_matrices : list[Tensor] or None
+            List of NxM matrices of precomputed IoU value.
+        """
         raise NotImplementedError
 
-    def __call__(self, groundtruths, predictions, predictions_score,
-                 iou_matrices=None):
-        value = self.call(
-            groundtruths, predictions, predictions_score, iou_matrices)
+    def __call__(self, *args, **kwargs):
+        value = self.call(*args, **kwargs)
         self.last_value = value
         return value
 
@@ -34,7 +59,7 @@ class BaseRPNMetric:
 
 
 @register_metric
-class BoxRecall(BaseRPNMetric):
+class BoxRecall(BaseMetric):
     """Calculate box recall for class-agnostic task.
 
     Parameters
@@ -47,34 +72,15 @@ class BoxRecall(BaseRPNMetric):
         super(BoxRecall, self).__init__()
         self.iou_threshold = iou_threshold
 
-    def call(self, groundtruths, predictions, predictions_score,
-             iou_matrices=None):
-        """Calculate box recall for class-agnostic task.
-
-        Parameters
-        ----------
-        groundtruths : list[Tensor]
-            List of groundtruth boxes of size `batch_size`. Each element is a
-            tensor of shape (M, 4).
-        predictions : list[Tensor]
-            List of predictions of size `batch_size`. Each element is a tensor
-            of shape (N, 4).
-        predictions_score : list[Tensor]
-            Scores corresponding for each prediction in `predictions` tensor.
-        iou_matrices : list[Tensor] or None
-            List of NxM matrices.
-
-        Returns
-        -------
-        recall_score
-        """
-        assert len(predictions) == len(groundtruths)
+    def call(self, gt_boxes, pred_boxes, pred_objectness, iou_matrices=None):
+        """Calculate box recall for class-agnostic task."""
+        assert len(gt_boxes) == len(pred_boxes)
         if iou_matrices is None:
             iou_matrices = [
-                box_iou(groundtruths_i, predictions_i) for
-                groundtruths_i, predictions_i in zip(groundtruths, predictions)
+                box_iou(gt_boxes_i, pred_boxes_i) for
+                gt_boxes_i, pred_boxes_i in zip(gt_boxes, pred_boxes)
             ]
-            return self(groundtruths, predictions, predictions_score,
+            return self(gt_boxes, pred_boxes, pred_objectness,
                         iou_matrices=iou_matrices)
 
         tot_boxes = 0
@@ -93,7 +99,7 @@ class BoxRecall(BaseRPNMetric):
         return f"recall: {self.last_value:.4f}"
 
 
-class RPNMetric:
+class MetricHolder:
     """Metric holder"""
     def __init__(self, metrics_config):
         self.metrics_config = metrics_config
@@ -103,19 +109,29 @@ class RPNMetric:
             metric_initialized = all_metrics[metric_name](**metric_config)
             self.metrics[metric_name] = metric_initialized
 
-    def __call__(self, groundtruths, predictions, predictions_score):
-        """Calculate all metrics.
+    def __call__(self, gt_boxes, gt_labels, pred_boxes, pred_objectness,
+                 pred_classes):
+        """Calculate metric.
 
         Parameters
         ----------
-        groundtruths : list[Tensor]
+        gt_boxes : list[Tensor]
             List of groundtruth boxes of size `batch_size`. Each element is a
             tensor of shape (M, 4).
-        predictions : list[Tensor]
+        gt_labels : list[Tensor]
+            List of groundtruth labels of size `batch_size`. Each element is a
+            tensor of shape (M,).
+        pred_boxes : list[Tensor]
             List of predictions of size `batch_size`. Each element is a tensor
             of shape (N, 4).
-        predictions_score : list[Tensor]
-            Scores corresponding for each prediction in `predictions` tensor.
+        pred_objectness : list[Tensor]
+            Objectness scores (e.g., output of RPN model) corresponding to
+            each prediction in `pred_boxes` tensor. List of size `batch_size`,
+            where each element is a tensor of shape (N,).
+        pred_classes : list[Tensor]
+            Predicted classes (e.g., output of Fast R-CNN model) corresponding
+            to each prediction in `pred_boxes` tensor. List of size
+            `batch_size`, where each element is a tensor of shape (N,).
 
         Returns
         -------
@@ -125,14 +141,28 @@ class RPNMetric:
         """
         iou_matrices = [
             box_iou(groundtruths_i, predictions_i) for
-            groundtruths_i, predictions_i in zip(groundtruths, predictions)
+            groundtruths_i, predictions_i in zip(gt_boxes, pred_boxes)
         ]
+        mapper = {
+            "gt_boxes": gt_boxes,
+            "gt_labels": gt_labels,
+            "pred_boxes": pred_boxes,
+            "pred_objectness": pred_objectness,
+            "pred_classes": pred_classes,
+            "iou_matrices": iou_matrices,
+        }
         results = {}
         self.last_result_str = []
 
         for metric_name, metric in self.metrics.items():
-            result = metric(
-                groundtruths, predictions, predictions_score, iou_matrices)
+            # Selectively call metric with its arguments
+            kwargs = {}
+            call_args = inspect.getfullargspec(
+                metric.call)[0][1:]  # not including `self`
+            for arg in call_args:
+                assert arg in mapper  # function args MUST be in `mapper` keys
+                kwargs[arg] = mapper[arg]
+            result = metric(**kwargs)
             results[metric_name] = result
             self.last_result_str.append(metric.get_str())
 

@@ -123,12 +123,18 @@ class MeanAverageBestOverlap(BaseMetric):
                              iou_matrices=iou_matrices)
 
         best_overlaps = []
-        for iou_matrix in iou_matrices:
-            best_overlap, _ = iou_matrix.max(dim=-1)
+        for iou_matrix, gt_labels_i in zip(iou_matrices, gt_labels):
+            # In case there is no predicted box
+            if iou_matrix.numel() == 0:
+                best_overlap = torch.zeros((gt_labels_i.shape[0],)).to(
+                    iou_matrix)
+            else:
+                best_overlap, _ = iou_matrix.max(dim=-1)
             best_overlaps.append(best_overlap)
 
         best_overlaps = torch.cat(best_overlaps)
         gt_labels = torch.cat(gt_labels).to(torch.int16)
+        assert len(best_overlaps) == len(gt_labels)
 
         # Sort
         gt_labels, sort_idxs = torch.sort(gt_labels)

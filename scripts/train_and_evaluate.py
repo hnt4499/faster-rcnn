@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import argparse
 import datetime
 from shutil import copy, SameFileError
@@ -108,6 +109,9 @@ def main(args):
         logger.add(logger_path, mode="a",
                    format="{time:YYYY-MM-DD at HH:mm:ss} | {message}")
         logger.info(f"Working directory: {save_dir}")
+
+    # Print config
+    logger.info(f"Config:\n{json.dumps(config, indent=2)}")
 
     # Train, val and test data
     data_info = config["data"]

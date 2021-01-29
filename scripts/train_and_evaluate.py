@@ -72,7 +72,7 @@ def main(args):
 
     # Metrics
     metrics_info = training_info["metrics"]
-    rpn_metrics = MetricHolder(metrics_info["rpn"])
+    rpn_metrics = MetricHolder(metrics_info["rpn"], config)
 
     # Unpack evaluating hyperparameters
     evaluate_info = config["evaluating"]

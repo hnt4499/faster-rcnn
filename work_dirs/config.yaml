@@ -57,7 +57,7 @@ training:
         rpn:
             BoxRecall: {iou_threshold: 0.5}
             MeanAverageBestOverlap: {}
-            # dr_win_curve: {}
+            DRWinCurve: {iou_threshold: 0.5}
 evaluating:
     evaluate_every: 1000  # iteration interval
     input_size: 400

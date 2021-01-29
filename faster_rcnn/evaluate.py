@@ -51,10 +51,10 @@ def evaluate(model, dataloader, device, prefix="", testing=False,
 
     tot_gt_boxes = batching(convert_xywh_to_xyxy, tot_gt_boxes)
     tot_pred_boxes = batching(convert_xywh_to_xyxy, tot_pred_boxes)
-    rpn_metrics(tot_gt_boxes, tot_gt_labels, tot_pred_boxes,
-                tot_pred_objectness, pred_classes=None)
+    metric_results = rpn_metrics(tot_gt_boxes, tot_gt_labels, tot_pred_boxes,
+                                 tot_pred_objectness, pred_classes=None)
     results = ", ".join(rpn_metrics.get_str())
     logger.info(f"{prefix}{results}")
 
     model.train()
-    return
+    return metric_results

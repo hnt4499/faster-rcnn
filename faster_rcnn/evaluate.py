@@ -26,6 +26,7 @@ def evaluate(model, dataloader, device, prefix="", testing=False):
             images = images.to(device)
             bboxes = [bbox.to(device) for bbox in bboxes]
             labels = [label.to(device) for label in labels]
+            image_boundaries = image_boundaries.to(device)
 
             # Forward
             output = model(images, bboxes, labels, image_boundaries)

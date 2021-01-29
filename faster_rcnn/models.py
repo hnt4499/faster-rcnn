@@ -356,14 +356,26 @@ class RPNModel(nn.Module):
 
         if training:
             # Get a mask to filter out-of-image (cross_boundary) anchor boxes
-            valid_anchor_mask = self._filter_anchors(
-                anchor_boxes, image_boundaries, training=True)
-            # Apply mask; each of the resulting objects is a list of size
-            # `batch_size`, where each i-th element if either of shape (A_i,)
-            # or (A_i, 4) where A_i is the number of valid anchor boxes.
-            anchor_boxes = apply_mask(anchor_boxes, valid_anchor_mask)
-            preds_t = apply_mask(preds_t, valid_anchor_mask)
-            preds_cls = apply_mask(preds_cls, valid_anchor_mask)
+            valid_anchor_mask = self._get_anchor_mask(
+                anchor_boxes, image_boundaries, training=True
+            )  # (B, H * W * A)
+            # Get a mask to filter images whose anchor boxes are all invalid
+            batch_mask = self._get_batch_mask(valid_anchor_mask)  # (B,)
+            # Filter images whose anchor boxes are all invalid
+            anchor_boxes, preds_t, preds_cls, valid_anchor_mask = [
+                tensor[~batch_mask] for tensor in
+                [anchor_boxes, preds_t, preds_cls, valid_anchor_mask]
+            ]
+            gt_boxes = [
+                gt_box for gt_box, m in zip(gt_boxes, batch_mask) if not m]
+            # Filter out-of-image anchor boxes; each of the resulting objects
+            # is a list of size `batch_size'`, where `batch_size'` <=
+            # `batch_size`, and where each i-th element if either of shape
+            # (A_i,) or (A_i, 4) where A_i is the number of valid anchor boxes.
+            anchor_boxes, preds_t, preds_cls = [
+                apply_mask(tensor, valid_anchor_mask) for tensor in
+                [anchor_boxes, preds_t, preds_cls]
+            ]
 
             # Map each groundtruth with its corresponding anchor box(es)
             # labels: list of size `batch_size`, where each element is of shape
@@ -477,7 +489,7 @@ class RPNModel(nn.Module):
 
         return output
 
-    def _filter_anchors(self, anchor_boxes, image_boundaries, training):
+    def _get_anchor_mask(self, anchor_boxes, image_boundaries, training):
         """Get mask with True indicating anchor boxes to ignore and False
         indicating anchor boxes to keep.
 
@@ -491,29 +503,29 @@ class RPNModel(nn.Module):
         # Filter all boxes whose height or width is not postive due to
         # approximation in RoI calculation.
         mask_all = ((anchor_boxes[:, :, 2] <= 0)
-                    | (anchor_boxes[:, :, 3] <= 0))
+                    | (anchor_boxes[:, :, 3] <= 0))  # (B, H * W * A)
 
         # Filter all boxes that cross image boundary during training.
         if training and self.handle_cross_boundary_boxes:
-            all_masks = []
             anchor_boxes = convert_xywh_to_xyxy(
                 anchor_boxes)  # (B, H * W * A, 4)
             image_boundaries = convert_xywh_to_xyxy(
-                image_boundaries)  # (B, 4)
+                image_boundaries).unsqueeze(1)  # (B, 1, 4)
 
             assert len(anchor_boxes) == len(image_boundaries) == len(mask_all)
-            for anchor_box, image_boundary, mask in \
-                    zip(anchor_boxes, image_boundaries, mask_all):
-                mask = (
-                    (anchor_boxes[:, :2] < image_boundaries[:2]).any(dim=-1)
-                    | (anchor_boxes[:, 2:] > image_boundaries[2:]).any(dim=-1)
-                    | mask
-                )
-                all_masks.append(mask)
+            mask = (
+                (anchor_boxes[:, :, :2] < image_boundaries[:, :, :2]).any(-1)
+                | (anchor_boxes[:, :, 2:] > image_boundaries[:, :, 2:]).any(-1)
+            )  # (B, H * W * A)
+            mask = mask | mask_all  # (B, H * W * A)
         else:
-            all_masks = mask_all
+            mask = mask_all
 
-        return all_masks
+        return mask  # (B, H * W * A)
+
+    @staticmethod
+    def _get_batch_mask(anchor_mask):
+        return anchor_mask.all(dim=-1)  # (B,)
 
     def _label_anchors(self, gt_boxes, anchor_boxes):
         """Label anchors as positive or negative or "ignored" given the

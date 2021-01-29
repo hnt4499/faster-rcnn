@@ -42,7 +42,7 @@ model:
     batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
     reg_lambda: 1.0
     normalize_offsets: false
-    handle_cross_boundary_boxes: true
+    handle_cross_boundary_boxes: false
 training:
     work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
     input_size: 400  # the `anchor_areas` and `input_size` are directly dependent of each other

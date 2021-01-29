@@ -74,6 +74,14 @@ def main(args):
     test_transforms = get_transforms(
         input_size=evaluate_info["input_size"],
         transforms_mode=evaluate_info["transforms_mode"])
+    # Post-processing hyperparameters
+    # RPN
+    rpn_info = evaluate_info["post_process"]["rpn"]
+    rpn_pre_nms_top_n = rpn_info["pre_nms_top_n"]
+    rpn_post_nms_top_n = rpn_info["post_nms_top_n"]
+    rpn_nms_iou_threshold = rpn_info["nms_iou_threshold"]
+    rpn_score_threshold = rpn_info["score_threshold"]
+    rpn_min_size = rpn_info["min_size"]
 
     load_from = args.load_from
     resume_from = args.resume_from
@@ -141,7 +149,12 @@ def main(args):
     ).to(device)
     rpn_model = RPNModel(
         backbone_model, anchor_areas, aspect_ratios, kernel_size, num_channels,
-        sampler, positive_fraction, batch_size_per_image, reg_lambda
+        sampler, positive_fraction, batch_size_per_image, reg_lambda,
+        normalize_offsets=normalize_offsets,
+        handle_cross_boundary_boxes=handle_cross_boundary_boxes,
+        pre_nms_top_n=rpn_pre_nms_top_n, post_nms_top_n=rpn_post_nms_top_n,
+        nms_iou_threshold=rpn_nms_iou_threshold,
+        score_threshold=rpn_score_threshold, min_size=rpn_min_size
     ).to(device)
     rpn_optimizer = optim.Adam(
         [params for params in rpn_model.parameters() if params.requires_grad],

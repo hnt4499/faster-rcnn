@@ -39,6 +39,11 @@ model:
     kernel_size: 3
     num_channels: 512
     sampler:
+        # sampler_name: RandomSamplerWithHardNegativeMining
+        # kwargs:
+        #     positive_fraction: 0.5
+        #     batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
+        #     hard_fraction: {start: 0, end: 0.5, steps: 1000, dtype: float}
         sampler_name: RandomSampler
         kwargs:
             positive_fraction: 0.5
@@ -49,7 +54,8 @@ model:
         during_training: false
         during_testing: true
 training:
-    work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
+    # work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
+    work_dir: null  # set to `null` to not save anything
     input_size: 400  # the `anchor_areas` and `input_size` are directly dependent of each other
     transforms_mode: simple  # refer to `faster_rcnn.transforms.get_transforms`
     device: cuda

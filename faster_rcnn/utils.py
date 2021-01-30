@@ -2,6 +2,7 @@ import time
 import inspect
 
 import torch
+import numpy as np
 
 
 def smooth_l1_loss(input, target, beta=1. / 9, size_average=False):
@@ -260,3 +261,23 @@ class Timer:
 
     def get_total_time(self):
         return time.time() - self.global_start_time
+
+
+class Incrementor:
+    """Gradually increase from `start` to `end` over `steps` steps."""
+    @from_config(requires_all=True)
+    def __init__(self, start, end, steps, dtype="float"):
+        self.start = start
+        self.end = end
+        self.steps = steps
+
+        self.spaces = np.linspace(start, end, num=steps + 1, dtype=dtype)
+        self.curr_step = 0
+
+    def step(self):
+        # It doesn't matter after we reach `steps` steps
+        if self.curr_step < self.steps:
+            self.curr_step += 1
+
+    def get(self):
+        return self.spaces[self.curr_step]

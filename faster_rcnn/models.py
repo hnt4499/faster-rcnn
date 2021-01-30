@@ -398,7 +398,8 @@ class RPNModel(nn.Module):
 
             # sampled_pos_inds and sampled_neg_inds: list of size `batch_size`,
             # where each element is of shape (A_i,)
-            sampled_pos_inds, sampled_neg_inds = self.sampler(labels)
+            sampled_pos_inds, sampled_neg_inds = self.sampler(
+                anchor_labels=labels, pred_objectness=pred_cls)
 
             # sampled_pos_inds: (S_pos,); sampled_neg_inds: (S_neg,), where
             # S_pos, S_neg are the total number positive and negative examples

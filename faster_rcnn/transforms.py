@@ -1,10 +1,9 @@
-import inspect
-from functools import partial
-
 import numpy as np
 import torch
 from torchvision import transforms
 import albumentations as A
+
+from .utils import flexible_wrapper
 
 
 def get_transforms(input_size=600, transforms_mode="no"):
@@ -68,73 +67,6 @@ class AlbumentationsWrapper:
         return new_outp
 
 
-class IDict(dict):
-    def __getitem__(self, key):
-        if key not in self:
-            return key
-        return super(IDict, self).__getitem__(key)
-
-
-def flexible_wrapper(func, input_args=None, output_names=None, rename_args={}):
-    """Wraps transformation calls (`__call__`) so that it can take any keyword
-    arguments. Note that the function is restricted to pass only keyword
-    arguments to the `__call__` function, but NOT positinal arguments. Also,
-    if `output_names` is not specified, the output of each `__call__` function
-    must be again a dict to update the existing `kwargs` (see below).
-
-    Parameters
-    ----------
-    output_names : list of str or None
-        If not specified, the output of `func` must be a dict.
-        If specified, map each of `output_names` to each the output of `func`
-        to form a new dict.
-    rename_args : dict
-        A dict containing arguments in source function and their respective
-        name in target function. Used to rename args for consistency.
-    """
-    if input_args is not None:
-        func_args = input_args
-    else:
-        func_args = inspect.getfullargspec(func)[0][1:]  # not including `self`
-
-    to_new_args = IDict(rename_args)
-    assert len(set(to_new_args.values())) == len(to_new_args)
-
-    def wrapper(self, *args, **kwargs):
-        if len(args) > 0:
-            raise TypeError(
-                "You must pass all arguments as keyword arguments.")
-        # Get actual args
-        actual_kwargs = {}
-        for arg in func_args:
-            if to_new_args[arg] in kwargs:
-                actual_kwargs[arg] = kwargs[to_new_args[arg]]
-                del kwargs[to_new_args[arg]]
-
-        # Call function
-        outp = func(self, **actual_kwargs)
-
-        # Post process
-        if output_names is not None:
-            if len(output_names) == 1:
-                outp = {output_names[0]: outp}
-            else:
-                assert len(output_names) == len(outp)
-                outp = dict(zip(output_names, outp))
-
-        # Update exising kwargs
-        kwargs.update(outp)
-
-        # Convert to new args
-        new_outp = {}
-        for k, v in kwargs.items():
-            new_outp[to_new_args[k]] = v
-
-        return new_outp
-
-    return wrapper
-
-
 class Compose(transforms.Compose):
     def __call__(self, **kwargs):
         outp = kwargs
@@ -152,7 +84,7 @@ class ResizeAndPad:
         self.size = size
         self.interpolation = interpolation
 
-    @flexible_wrapper
+    @flexible_wrapper()
     def __call__(self, image, bboxes=None):
         """Perform resizing.
 
@@ -200,14 +132,12 @@ class ResizeAndPad:
         return s
 
 
-def make_class_flexible(cls, input_args=None, output_names=None,
+def make_class_flexible(cls, func_args=None, output_names=None,
                         rename_args={}):
-    wrapper = partial(
-        flexible_wrapper, input_args=input_args, output_names=output_names,
-        rename_args=rename_args)
 
     class FlexibleClass(cls):
-        @wrapper
+        @flexible_wrapper(func_args=func_args, output_names=output_names,
+                          rename_args=rename_args)
         def __call__(self, **kwargs):
             return super(FlexibleClass, self).__call__(**kwargs)
 
@@ -216,10 +146,10 @@ def make_class_flexible(cls, input_args=None, output_names=None,
 
 
 ToTensor = make_class_flexible(
-    transforms.ToTensor, input_args=["pic"], output_names=["pic"],
+    transforms.ToTensor, func_args=["pic"], output_names=["pic"],
     rename_args={"pic": "image"})
 Normalize = make_class_flexible(
-    transforms.Normalize, input_args=["tensor"], output_names=["tensor"],
+    transforms.Normalize, func_args=["tensor"], output_names=["tensor"],
     rename_args={"tensor": "image"})
 # RandomResizedCrop = make_class_flexible(transforms.RandomResizedCrop)
 # RandomHorizontalFlip = make_class_flexible(transforms.RandomHorizontalFlip)

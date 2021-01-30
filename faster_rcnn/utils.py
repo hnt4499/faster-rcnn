@@ -104,15 +104,21 @@ def from_config(main_args=None, requires_all=False):
     requires_all : bool
         Whether all function arguments must be found in the config.
     """
-    if main_args is not None:
-        main_args = main_args.split("->")
+    global_main_args = main_args
+    if global_main_args is not None:
+        global_main_args = global_main_args.split("->")
 
     def decorator(init):
         init_args = inspect.getfullargspec(init)[0][1:]  # excluding self
 
-        def wrapper(self, config):
+        def wrapper(self, config, main_args=None):
             # Add config to self
             self.config = config
+
+            if main_args is None:
+                main_args = global_main_args
+            else:
+                main_args = main_args.split("->")  # overwrite global_main_args
 
             collected = {}  # contains keyword arguments
             # Collect from main args
@@ -133,6 +139,93 @@ def from_config(main_args=None, requires_all=False):
             # Call function
             return init(self, **collected)
         return wrapper
+    return decorator
+
+
+class IDict(dict):
+    """Dict that returns `key` (i.e., identity) if `key` is not found."""
+    def __getitem__(self, key):
+        if key not in self:
+            return key
+        return super(IDict, self).__getitem__(key)
+
+
+def flexible_wrapper(func_args=None, output_names=None, rename_args={}):
+    """Wraps calls (`__call__` functions) so that it can take any keyword
+    arguments. Note that the function is restricted to pass only keyword
+    arguments to the `__call__` function, but NOT positinal arguments. Also,
+    if `output_names` is not specified, the output of each `__call__` function
+    must be again a dict to update the existing `kwargs` (see below).
+
+    This wrapper is particularly useful for transformations (to ensure
+    consistency between inputs and outputs). Nevertheless, it can be used for
+    any `__call__` function.
+
+    Parameters
+    ----------
+    func_args : list of str or None
+        If specified, use this instead of inspecting the function being
+        wrapped. This is useful for functions that take general inputs like
+        `__call__(*args, **kwargs)`.
+    output_names : list of str or None
+        If not specified
+            If the output of `func` is a dict, `rename_args` will be used to
+            rename the output (if necessary).
+            Otherwise, return the output as is.
+        If specified, map each of `output_names` to each the output of `func`
+        to form a new dict of output.
+    rename_args : dict
+        A dict containing arguments in source function and their respective
+        name in target function. Used to rename args for consistency.
+    """
+
+    def decorator(func):
+        if func_args is None:
+            input_args = inspect.getfullargspec(
+                func)[0][1:]  # not including `self`
+        else:
+            input_args = func_args
+
+        to_new_args = IDict(rename_args)
+        assert len(set(to_new_args.values())) == len(to_new_args)  # uniqueness
+
+        def wrapper(self, *args, **kwargs):
+            if len(args) > 0:
+                raise TypeError(
+                    "You must pass all arguments as keyword arguments.")
+            # Get actual args
+            actual_kwargs = {}
+            for arg in input_args:
+                if to_new_args[arg] in kwargs:
+                    actual_kwargs[arg] = kwargs[to_new_args[arg]]
+                    del kwargs[to_new_args[arg]]
+
+            # Call function
+            outp = func(self, **actual_kwargs)
+
+            # Post process
+            if output_names is not None:
+                if len(output_names) == 1:
+                    outp = {output_names[0]: outp}
+                else:
+                    assert len(output_names) == len(outp)
+                    outp = dict(zip(output_names, outp))
+
+            if isinstance(outp, dict):
+                # Update existing kwargs
+                kwargs.update(outp)
+
+                # Convert to new args
+                new_outp = {}
+                for k, v in kwargs.items():
+                    new_outp[to_new_args[k]] = v
+
+                outp = new_outp
+
+            return outp
+
+        return wrapper
+
     return decorator
 
 

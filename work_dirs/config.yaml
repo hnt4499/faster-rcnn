@@ -22,8 +22,9 @@ data:
             difficult: false
 
 model:
-    backbone: resnet50
-    backbone_freeze_all: false
+    backbone:
+        model_name: resnet50
+        freeze_all: false
     anchor_areas:
         # - 16384  # 128 * 128
         # - 65536  # 256 * 256

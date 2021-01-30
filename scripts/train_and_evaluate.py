@@ -44,18 +44,6 @@ def main(args):
 
     # Unpack model hyperparameters
     model_info = config["model"]
-    backbone_name = model_info["backbone"]
-    backbone_freeze_all = model_info["backbone_freeze_all"]
-    anchor_areas = model_info["anchor_areas"]
-    aspect_ratios = model_info["aspect_ratios"]
-    kernel_size = model_info["kernel_size"]
-    num_channels = model_info["num_channels"]
-    sampler = model_info["sampler"]
-    positive_fraction = model_info["positive_fraction"]
-    batch_size_per_image = model_info["batch_size_per_image"]
-    reg_lambda = model_info["reg_lambda"]
-    normalize_offsets = model_info["normalize_offsets"]
-    handle_cross_boundary_boxes = model_info["handle_cross_boundary_boxes"]
 
     # Unpack training hyperparameters
     training_info = config["training"]
@@ -79,14 +67,6 @@ def main(args):
     test_transforms = get_transforms(
         input_size=evaluate_info["input_size"],
         transforms_mode=evaluate_info["transforms_mode"])
-    # Post-processing hyperparameters
-    # RPN
-    rpn_info = evaluate_info["post_process"]["rpn"]
-    rpn_pre_nms_top_n = rpn_info["pre_nms_top_n"]
-    rpn_post_nms_top_n = rpn_info["post_nms_top_n"]
-    rpn_nms_iou_threshold = rpn_info["nms_iou_threshold"]
-    rpn_score_threshold = rpn_info["score_threshold"]
-    rpn_min_scale = rpn_info["min_scale"]
 
     load_from = args.load_from
     resume_from = args.resume_from
@@ -153,18 +133,10 @@ def main(args):
     # Initialize model
     device = torch.device(device)
     logger.info("Initializing model...")
-    backbone_model = BackboneModel(
-        model_name=backbone_name, freeze_all=backbone_freeze_all
-    ).to(device)
-    rpn_model = RPNModel(
-        backbone_model, anchor_areas, aspect_ratios, kernel_size, num_channels,
-        sampler, positive_fraction, batch_size_per_image, reg_lambda,
-        normalize_offsets=normalize_offsets,
-        handle_cross_boundary_boxes=handle_cross_boundary_boxes,
-        pre_nms_top_n=rpn_pre_nms_top_n, post_nms_top_n=rpn_post_nms_top_n,
-        nms_iou_threshold=rpn_nms_iou_threshold,
-        score_threshold=rpn_score_threshold, min_scale=rpn_min_scale
-    ).to(device)
+    backbone_model = BackboneModel(config).to(device)
+    model_info["backbone_model"] = backbone_model
+
+    rpn_model = RPNModel(config).to(device)
     rpn_optimizer = optim.Adam(
         [params for params in rpn_model.parameters() if params.requires_grad],
         lr=lr)

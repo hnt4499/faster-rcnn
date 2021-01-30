@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from torchvision import models
 from torchvision.ops import box_iou
 
-from .utils import smooth_l1_loss, index_argsort, apply_mask, index_batch
+from .utils import (smooth_l1_loss, index_argsort, apply_mask, index_batch,
+                    from_config)
 from .box_utils import (
     get_anchor_boxes, convert_xyxy_to_xywh, convert_xywh_to_xyxy,
     convert_coords_to_offsets, convert_offsets_to_coords,
@@ -82,6 +83,7 @@ def get_orig_stat(model_name):
 
 class BackboneModel(nn.Module):
     """Backbone model of Faster R-CNN."""
+    @from_config(main_args="model->backbone", requires_all=True)
     def __init__(self, model_name="resnet50", freeze_all=False):
         """Build the model.
 
@@ -195,6 +197,7 @@ class RPNModel(nn.Module):
         the Faster R-CNN paper, but is ignored in `torchvision`.
         (default: False)
     """
+    @from_config(main_args="model", requires_all=True)
     def __init__(self, backbone_model, anchor_areas, aspect_ratios,
                  kernel_size=3, num_channels=512, sampler="random_sampler",
                  positive_fraction=0.5, batch_size_per_image=256,

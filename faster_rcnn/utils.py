@@ -1,3 +1,5 @@
+import inspect
+
 import torch
 
 
@@ -68,3 +70,62 @@ def index_batch(x, idxs):
 def batching(function, inp):
     """Apply a function along the batch axis"""
     return [function(inp_i) for inp_i in inp]
+
+
+def collect(config, args, collected):
+    """Recursively collect each argument in `args` from `config` and write to
+    `collected`."""
+    if not isinstance(config, dict):
+        return
+
+    keys = list(config.keys())
+    for arg in args:
+        if arg in keys:
+            if arg in collected:  # already collected
+                raise RuntimeError(f"Found repeated argument: {arg}")
+            collected[arg] = config[arg]
+
+    for key, sub_config in config.items():
+        collect(sub_config, args, collected)
+
+
+def from_config(main_args=None, requires_all=False):
+    """Wrapper for all classes, which wraps `__init__` function to take in only
+    a `config` dict, and automatically collect all arguments from it. An error
+    is raised when duplication is found.
+
+    Parameters
+    ----------
+    main_args : str
+        If specified (with "a->b" format), arguments will first be collected
+        from this subconfig. If there are any arguments left, recursively find
+        them in the entire config.
+    requires_all : bool
+        Whether all function arguments must be found in the config.
+    """
+    if main_args is not None:
+        main_args = main_args.split("->")
+
+    def decorator(init):
+        init_args = inspect.getfullargspec(init)[0][1:]  # excluding self
+
+        def wrapper(self, config):
+            collected = {}  # contains keyword arguments
+            # Collect from main args
+            if main_args is not None:
+                sub_config = config
+                for main_arg in main_args:
+                    sub_config = sub_config[main_arg]
+                collect(sub_config, init_args, collected)
+            # Collect from the rest
+            not_collected = [arg for arg in init_args if arg not in collected]
+            collect(config, not_collected, collected)
+            # Validate
+            if requires_all and (len(collected) != len(init_args)):
+                raise RuntimeError(
+                    f"Found missing argument(s). Expected {init_args}, "
+                    f"collected {list(collected.keys())}.")
+            # Call function
+            return init(self, **collected)
+        return wrapper
+    return decorator

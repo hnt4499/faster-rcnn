@@ -76,7 +76,6 @@ def main(args):
 
     # Unpack evaluating hyperparameters
     evaluate_info = config["evaluating"]
-    evaluate_every = evaluate_info["evaluate_every"]
     test_transforms = get_transforms(
         input_size=evaluate_info["input_size"],
         transforms_mode=evaluate_info["transforms_mode"])
@@ -87,7 +86,7 @@ def main(args):
     rpn_post_nms_top_n = rpn_info["post_nms_top_n"]
     rpn_nms_iou_threshold = rpn_info["nms_iou_threshold"]
     rpn_score_threshold = rpn_info["score_threshold"]
-    rpn_min_size = rpn_info["min_size"]
+    rpn_min_scale = rpn_info["min_scale"]
 
     load_from = args.load_from
     resume_from = args.resume_from
@@ -164,7 +163,7 @@ def main(args):
         handle_cross_boundary_boxes=handle_cross_boundary_boxes,
         pre_nms_top_n=rpn_pre_nms_top_n, post_nms_top_n=rpn_post_nms_top_n,
         nms_iou_threshold=rpn_nms_iou_threshold,
-        score_threshold=rpn_score_threshold, min_size=rpn_min_size
+        score_threshold=rpn_score_threshold, min_scale=rpn_min_scale
     ).to(device)
     rpn_optimizer = optim.Adam(
         [params for params in rpn_model.parameters() if params.requires_grad],
@@ -216,20 +215,16 @@ def main(args):
         #     elif epoch == last_epoch and dataloader_i <= last_dataloader_i:
         #         continue
 
-        evaluator = partial(
-            evaluate, dataloader=dataloaders["val"],
-            device=device, testing=testing, rpn_metrics=rpn_metrics)
-
         # Train
         train(
             rpn_model, dataloaders["train"], rpn_optimizer, device,
-            epoch=epoch, total_epoch=num_epochs, testing=testing,
-            evaluate_every=evaluate_every, evaluator=evaluator)
+            epoch=epoch, total_epoch=num_epochs, testing=testing)
 
         # Evaluate
-        evaluator(
-            model=rpn_model,
-            prefix=f"Validation (epoch: {epoch}/{num_epochs}): ")
+        evaluate(
+            rpn_model, dataloaders["val"], device, rpn_metrics=rpn_metrics,
+            prefix=f"Validation (epoch: {epoch}/{num_epochs}): ",
+            testing=testing)
 
         # Save model
         if save_dir is not None:
@@ -240,7 +235,8 @@ def main(args):
 
     # Test
     evaluate(
-        rpn_model, dataloaders["test"], device, prefix="Test: ")
+        rpn_model, dataloaders["test"], device, rpn_metrics=rpn_metrics,
+        prefix="Test: ")
     logger.info("Training finished.")
 
 

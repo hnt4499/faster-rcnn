@@ -59,7 +59,6 @@ training:
             MeanAverageBestOverlap: {}
             DRWinCurve: {iou_threshold: 0.5}
 evaluating:
-    evaluate_every: 1000  # iteration interval
     input_size: 400
     transforms_mode: simple
     post_process:

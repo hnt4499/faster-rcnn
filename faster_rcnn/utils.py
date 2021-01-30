@@ -110,6 +110,9 @@ def from_config(main_args=None, requires_all=False):
         init_args = inspect.getfullargspec(init)[0][1:]  # excluding self
 
         def wrapper(self, config):
+            # Add config to self
+            self.config = config
+
             collected = {}  # contains keyword arguments
             # Collect from main args
             if main_args is not None:

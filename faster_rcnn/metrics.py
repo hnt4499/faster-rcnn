@@ -8,16 +8,7 @@ import matplotlib.pyplot as plt
 from loguru import logger
 
 from .utils import index_argsort
-
-
-all_metrics = {}
-
-
-def register_metric(func):
-    if func.__name__ in all_metrics:
-        raise RuntimeError(f"Metric {func.__name__} already exists")
-    all_metrics[func.__name__] = func
-    return func
+from .registry import register, registry
 
 
 class BaseMetric:
@@ -65,7 +56,7 @@ class BaseMetric:
         raise NotImplementedError
 
 
-@register_metric
+@register("metric")
 class BoxRecall(BaseMetric):
     """Calculate box recall for class-agnostic task.
 
@@ -105,7 +96,7 @@ class BoxRecall(BaseMetric):
         return f"recall: {self.last_value:.4f}"
 
 
-@register_metric
+@register("metric")
 class MeanAverageBestOverlap(BaseMetric):
     """Calculate mean average best overlap (MABO).
 
@@ -162,7 +153,7 @@ class MeanAverageBestOverlap(BaseMetric):
         return f"mABO: {self.last_value:.4f}"
 
 
-@register_metric
+@register("metric")
 class DRWinCurve(BaseMetric):
     """Plot the DR-#WIN curve (detection-rate (recall) versus the number of
     windows per image) and calculate area under the DR-#WIN curve approximated
@@ -286,7 +277,7 @@ class MetricHolder:
         self.last_result_str = None
         self.metrics = {}
         for metric_name, metric_config in metrics_config.items():
-            metric_initialized = all_metrics[metric_name](
+            metric_initialized = registry["metric"][metric_name](
                 config=all_config, **metric_config)
             self.metrics[metric_name] = metric_initialized
 

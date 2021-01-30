@@ -1,22 +1,16 @@
 import torch
 
-
-def get_sampler(sampler_name):
-    samplers = {
-        "random_sampler": RandomSampler,
-    }
-    if sampler_name not in samplers:
-        raise ValueError(
-            f"Invalid sampler name. Expected one of {list(samplers.keys())}, "
-            f"got {sampler_name} instead.")
-    return samplers[sampler_name]
+from .utils import from_config
+from .registry import register
 
 
+@register("sampler")
 class RandomSampler:
     """Random positive and negative example sampler.
     Adapted from
         https://github.com/pytorch/vision/blob/f16322b596c7dc9e9d67d3b40907694f29e16357/torchvision/models/detection/_utils.py#L10
     """
+    @from_config(main_args="model->sampler", requires_all=True)
     def __init__(self, batch_size_per_image, positive_fraction):
         assert 0 <= positive_fraction <= 1
         self.batch_size_per_image = batch_size_per_image

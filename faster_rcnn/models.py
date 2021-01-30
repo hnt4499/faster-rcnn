@@ -11,7 +11,7 @@ from .box_utils import (
     convert_coords_to_offsets, convert_offsets_to_coords,
     box_area, batched_nms, Matcher
 )
-from .samplers import get_sampler
+from .registry import registry
 
 
 def get_layers(model_name):
@@ -173,7 +173,7 @@ class RPNModel(nn.Module):
         Number of channels of the n x n conv layer and two 1 x 1 sibling conv
         layers. Note that 1 x 1 conv layers are implemented as linear layers.
         (default: 512, as in the paper)
-    sampler : str
+    sampler_name : str
         Positive/negative sampler name. (default: "random_sampler")
     positive_fraction : float
         The fraction of number of postive samples per image batch.
@@ -199,7 +199,8 @@ class RPNModel(nn.Module):
     """
     @from_config(main_args="model", requires_all=True)
     def __init__(self, backbone_model, anchor_areas, aspect_ratios,
-                 kernel_size=3, num_channels=512, sampler="random_sampler",
+                 kernel_size=3, num_channels=512,
+                 sampler_name="random_sampler",
                  positive_fraction=0.5, batch_size_per_image=256,
                  reg_lambda=1.0, normalize_offsets=False,
                  handle_cross_boundary_boxes=False,
@@ -212,9 +213,7 @@ class RPNModel(nn.Module):
         self.num_anchor_boxes = len(anchor_areas) * len(aspect_ratios)
         self.kernel_size = kernel_size
         self.num_channels = num_channels
-        self.sampler = get_sampler(sampler)(
-            batch_size_per_image=batch_size_per_image,
-            positive_fraction=positive_fraction)
+        self.sampler = registry["sampler"][sampler_name](self.config)
         self.reg_lambda = reg_lambda
         self.normalize_offsets = normalize_offsets
         self.handle_cross_boundary_boxes = handle_cross_boundary_boxes

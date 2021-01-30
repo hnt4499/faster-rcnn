@@ -5,7 +5,7 @@ from torchvision import models
 from torchvision.ops import box_iou
 
 from .utils import (smooth_l1_loss, index_argsort, apply_mask, index_batch,
-                    from_config)
+                    batching, from_config)
 from .box_utils import (
     get_anchor_boxes, convert_xyxy_to_xywh, convert_xywh_to_xyxy,
     convert_coords_to_offsets, convert_offsets_to_coords,
@@ -307,10 +307,10 @@ class RPNModel(nn.Module):
         gt_boxes : list of torch.Tensor
             If specified, it should be list of size `batch_size`, where i-th
                 element of shape (x_i, 4) represents the bounding boxes'
-                coordinates (x_center, y_center, width, height) of the i-th
-                image, and x_i is the total number of boxes of the i-th image.
+                coordinates (xmin, ymin, xmax, ymax) of the i-th image, and x_i
+                is the number of boxes of the i-th image.
             If not specified, the function will return a list of proposal boxes
-            and its scores.
+            and its scores, as is during inference.
         labels
             Not important. It is specified just to ensure a consistent
             arguments across different models.
@@ -346,6 +346,8 @@ class RPNModel(nn.Module):
         ).to(inp.device)  # (H * W * A, 4)
         # Scale the anchor x, y coordinates back to the original image sizes
         anchor_boxes[:, :2] = self.scale_fm_to_input(anchor_boxes[:, :2])
+        # Convert from xywh to xyxy
+        anchor_boxes = convert_xywh_to_xyxy(anchor_boxes)
         anchor_boxes = anchor_boxes.repeat(
             batch_size, 1, 1)  # (B, H * W * A, 4)
 
@@ -354,7 +356,6 @@ class RPNModel(nn.Module):
             image_boundaries = torch.tensor(
                 [0, 0, inp.shape[3], inp.shape[2]]
             ).repeat(inp.shape[0], 1)  # (B, 4)
-            image_boundaries = convert_xyxy_to_xywh(image_boundaries)  # (B, 4)
 
         if training:
             # Get a mask to filter out-of-image (cross_boundary) anchor boxes
@@ -391,7 +392,8 @@ class RPNModel(nn.Module):
             # gt_t: list of size `batch_size`, where each element is of shape
             # (A_i, 4)
             gt_t = convert_coords_to_offsets(
-                matched_gt_boxes, anchor_boxes)
+                batching(convert_xyxy_to_xywh, matched_gt_boxes),
+                batching(convert_xyxy_to_xywh, anchor_boxes))
             gt_t = self._normalize_box_offsets(gt_t)
 
             # sampled_pos_inds and sampled_neg_inds: list of size `batch_size`,
@@ -447,10 +449,11 @@ class RPNModel(nn.Module):
 
             # Convert offsets to coordinates
             pred_boxes = convert_offsets_to_coords(
-                pred_t, anchor_boxes)  # (B, N_pre, 4)
+                pred_t, convert_xyxy_to_xywh(anchor_boxes))  # (B, N_pre, 4)
+            pred_boxes = convert_xywh_to_xyxy(pred_boxes)
             # Clip to feature map boundary
             pred_boxes = self._clip_boxes_to_image_boundary(
-                pred_boxes, image_boundaries, mode="xywh")  # (B, N_pre, 4)
+                pred_boxes, image_boundaries, mode="xyxy")  # (B, N_pre, 4)
 
             # Remove small or low scoring boxes; pred_boxes and pred_cls:
             # lists of size `batch_size`, where each element corresponds
@@ -504,16 +507,13 @@ class RPNModel(nn.Module):
         """
         # Filter all boxes whose height or width is not postive due to
         # approximation in RoI calculation.
-        mask_all = ((anchor_boxes[:, :, 2] <= 0)
-                    | (anchor_boxes[:, :, 3] <= 0))  # (B, H * W * A)
+        mask_all = (
+            ((anchor_boxes[:, :, 2] - anchor_boxes[:, :, 0]) <= 0)
+            | ((anchor_boxes[:, :, 3] - anchor_boxes[:, :, 1]) <= 0)
+        )  # (B, H * W * A)
 
         # Filter all boxes that cross image boundary during training.
         if training and self.handle_cross_boundary_boxes["during_training"]:
-            anchor_boxes = convert_xywh_to_xyxy(
-                anchor_boxes)  # (B, H * W * A, 4)
-            image_boundaries = convert_xywh_to_xyxy(
-                image_boundaries).unsqueeze(1)  # (B, 1, 4)
-
             assert len(anchor_boxes) == len(image_boundaries) == len(mask_all)
             mask = (
                 (anchor_boxes[:, :, :2] < image_boundaries[:, :, :2]).any(-1)
@@ -536,10 +536,10 @@ class RPNModel(nn.Module):
         Parameters
         ----------
         gt_boxes : list[Tensor[float]]
-            List of groundtruth boxes for each image in the xywh format.
+            List of groundtruth boxes for each image in the xyxy format.
         anchor_boxes : list[Tensor[float]]
             List of of anchor boxes for each image over the original input size
-            in the xywh format.
+            in the xyxy format.
 
         Returns
         -------
@@ -549,15 +549,12 @@ class RPNModel(nn.Module):
             (positive), `0.0` if it is unmatched (negative), and `-1.0` if it
             is ignored.
         matched_gt_boxes : list[Tensor[float]]
-            List of groundtruth matches for each image in the xywh format.
+            List of groundtruth matches for each image in the xyxy format.
         """
         labels, matched_gt_boxes = [], []
 
         for gt_boxes_i, anchor_boxes_i in zip(gt_boxes, anchor_boxes):
-            gt_boxes_i_xyxy = convert_xywh_to_xyxy(gt_boxes_i)
-            anchor_boxes_i_xyxy = convert_xywh_to_xyxy(anchor_boxes_i)
-
-            iou = box_iou(gt_boxes_i_xyxy, anchor_boxes_i_xyxy)  # (x_i, F)
+            iou = box_iou(gt_boxes_i, anchor_boxes_i)  # (x_i, F)
             matched_idxs = self.box_matcher(iou)  # (F,)
             # get the targets corresponding GT for each proposal
             # NB: need to clamp the indices because we can have a single
@@ -639,7 +636,7 @@ class RPNModel(nn.Module):
         ----------
         boxes : torch.Tensor
             Tensor of shape (B, ..., 4), where `...` could be any of number of
-            dimensions. xywh formatted.
+            dimensions. xyxy formatted.
         image_boundaries : torch.Tensor
             Tensor of shape (B, 4) representing the original image boundaries
             as bounding boxes in the transformed batch.
@@ -651,9 +648,9 @@ class RPNModel(nn.Module):
             Shaped (B, ...), where `...` corresponds to that of `boxes`.
         """
         assert len(boxes) == len(image_boundaries)
-        box_areas = box_area(boxes, mode="xywh")  # (B, ...)
+        box_areas = box_area(boxes, mode="xyxy")  # (B, ...)
         image_areas = box_area(
-            image_boundaries, mode="xywh")  # (B,)
+            image_boundaries, mode="xyxy")  # (B,)
 
         num_dim_to_add = box_areas.ndim - 1
         new_view = [image_areas.shape[0]] + [1] * num_dim_to_add

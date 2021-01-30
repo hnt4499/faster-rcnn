@@ -5,8 +5,6 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
-from faster_rcnn.box_utils import convert_xyxy_to_xywh
-
 
 def get_dataset(name):
     """Get dataset initializer from its format"""
@@ -144,7 +142,7 @@ def collate_fn(batch, transforms):
         images_trans.append(outp["image"])
         labelss_trans.append(outp["class_labels"])
 
-        bboxes_trans = convert_xyxy_to_xywh(outp["bboxes"])
+        bboxes_trans = outp["bboxes"]
         bboxess_trans.append(bboxes_trans[:-1, :])
         image_boundaries.append(bboxes_trans[-1, :])
 

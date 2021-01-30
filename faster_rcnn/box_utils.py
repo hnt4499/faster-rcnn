@@ -181,7 +181,6 @@ def batched_nms(boxes, scores, iou_threshold):
     assert len(boxes) == len(scores)
     keep_idxs = []
     for boxes_per_image, scores_per_image in zip(boxes, scores):
-        boxes_per_image = convert_xywh_to_xyxy(boxes_per_image)
         keep = nms(boxes_per_image, scores_per_image, iou_threshold)
         keep_idxs.append(keep)
     return keep_idxs

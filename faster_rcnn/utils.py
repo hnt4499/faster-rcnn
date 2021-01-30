@@ -126,7 +126,8 @@ def from_config(main_args=None, requires_all=False):
             # Validate
             if requires_all and (len(collected) != len(init_args)):
                 raise RuntimeError(
-                    f"Found missing argument(s). Expected {init_args}, "
+                    f"Found missing argument(s) when initializing "
+                    f"{self.__class__.__name__} class. Expected {init_args}, "
                     f"collected {list(collected.keys())}.")
             # Call function
             return init(self, **collected)

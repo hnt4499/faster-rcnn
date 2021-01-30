@@ -2,6 +2,8 @@ import numpy as np
 import torch
 from torchvision.ops import nms
 
+from .utils import from_config
+
 
 def get_anchor_boxes(feature_map_size, anchor_areas, aspect_ratios):
     """
@@ -198,6 +200,8 @@ class Matcher:
     a negative value is returned.
     """
 
+    @from_config(main_args="evaluating->post_process->rpn->matcher",
+                 requires_all=True)
     def __init__(self, high_threshold, low_threshold,
                  allow_low_quality_matches=False):
         """

@@ -66,6 +66,10 @@ evaluating:
     transforms_mode: simple
     post_process:
         rpn:  # RPN hyperparameters
+            matcher:  # matches anchor boxes with groundtruth boxes
+                high_threshold: 0.7
+                low_threshold: 0.3
+                allow_low_quality_matches: true
             pre_nms_top_n: 2000  # number of boxes to keep before NMS
             post_nms_top_n: 500  # number of boxes to keep after NMS
             nms_iou_threshold: 0.7  # IOU threshold during NMS

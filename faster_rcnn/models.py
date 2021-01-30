@@ -226,9 +226,7 @@ class RPNModel(nn.Module):
         self.min_scale = min_scale
 
         # Box matcher
-        self.box_matcher = Matcher(
-            high_threshold=0.7, low_threshold=0.3,
-            allow_low_quality_matches=True)
+        self.box_matcher = Matcher(self.config)
 
         # Get RoI transformation function
         self.scale_input_to_fm = get_roi_stat(backbone_model.model_type)

@@ -187,7 +187,8 @@ class RPNModel(nn.Module):
         Whether to normalize box offsets as in the original paper. Note that
         in `torchvision`, offsets are NOT normalized, so this is False by
         default.
-    handle_cross_boundary_boxes : bool
+    handle_cross_boundary_boxes : dict
+        A dictionary with two keys: "during_training" and "during_testing".
         Handle cross-boundary boxes:
             During training, anchor boxes that crosses image boundary will be
             ignored.
@@ -195,7 +196,7 @@ class RPNModel(nn.Module):
             boundary.
         Note that similar to `normalize_offsets`, this setting is mentioned in
         the Faster R-CNN paper, but is ignored in `torchvision`.
-        (default: False)
+        (default: {"during_training": False, "during_testing": True})
     """
     @from_config(main_args="model", requires_all=True)
     def __init__(self, backbone_model, anchor_areas, aspect_ratios,
@@ -203,7 +204,8 @@ class RPNModel(nn.Module):
                  sampler_name="random_sampler",
                  positive_fraction=0.5, batch_size_per_image=256,
                  reg_lambda=1.0, normalize_offsets=False,
-                 handle_cross_boundary_boxes=False,
+                 handle_cross_boundary_boxes={"during_training": False,
+                                              "during_testing": True},
                  pre_nms_top_n=2000, post_nms_top_n=100,
                  nms_iou_threshold=0.7, score_threshold=0.1, min_scale=0.01):
         super(RPNModel, self).__init__()
@@ -506,7 +508,7 @@ class RPNModel(nn.Module):
                     | (anchor_boxes[:, :, 3] <= 0))  # (B, H * W * A)
 
         # Filter all boxes that cross image boundary during training.
-        if training and self.handle_cross_boundary_boxes:
+        if training and self.handle_cross_boundary_boxes["during_training"]:
             anchor_boxes = convert_xywh_to_xyxy(
                 anchor_boxes)  # (B, H * W * A, 4)
             image_boundaries = convert_xywh_to_xyxy(
@@ -596,7 +598,7 @@ class RPNModel(nn.Module):
         mode : str
             Either "xyxy" or "xywh", denote the how the boxes are represented.
         """
-        if not self.handle_cross_boundary_boxes:
+        if not self.handle_cross_boundary_boxes["during_testing"]:
             return boxes
 
         if mode not in ["xyxy", "xywh"]:

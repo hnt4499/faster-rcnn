@@ -68,4 +68,4 @@ evaluating:
             post_nms_top_n: 500  # number of boxes to keep after NMS
             nms_iou_threshold: 0.7  # IOU threshold during NMS
             score_threshold: 0.1  # boxes with objectness score smaller than this will be removed
-            min_size: 0.01  # fraction of box width/height to image width/height
+            min_scale: 0.01  # fraction of box width/height to image width/height

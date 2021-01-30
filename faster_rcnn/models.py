@@ -201,7 +201,7 @@ class RPNModel(nn.Module):
                  reg_lambda=1.0, normalize_offsets=False,
                  handle_cross_boundary_boxes=False,
                  pre_nms_top_n=2000, post_nms_top_n=100,
-                 nms_iou_threshold=0.7, score_threshold=0.1, min_size=0.01):
+                 nms_iou_threshold=0.7, score_threshold=0.1, min_scale=0.01):
         super(RPNModel, self).__init__()
         self.backbone_model = backbone_model
         self.anchor_areas = anchor_areas
@@ -221,7 +221,7 @@ class RPNModel(nn.Module):
         self.post_nms_top_n = post_nms_top_n
         self.nms_iou_threshold = nms_iou_threshold
         self.score_threshold = score_threshold
-        self.min_size = min_size
+        self.min_scale = min_scale
 
         # Box matcher
         self.box_matcher = Matcher(
@@ -657,5 +657,5 @@ class RPNModel(nn.Module):
         new_view = [image_areas.shape[0]] + [1] * num_dim_to_add
         image_areas = image_areas.view(*new_view).expand_as(box_areas)
 
-        mask = (box_areas / image_areas) < self.min_size  # (B, ...)
+        mask = (box_areas / image_areas) < self.min_scale  # (B, ...)
         return mask

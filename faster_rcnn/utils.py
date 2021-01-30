@@ -1,3 +1,4 @@
+import time
 import inspect
 
 import torch
@@ -133,3 +134,36 @@ def from_config(main_args=None, requires_all=False):
             return init(self, **collected)
         return wrapper
     return decorator
+
+
+class Timer:
+    def __init__(self):
+        self.global_start_time = time.time()
+        self.start_time = None
+        self.last_interval = None
+        self.accumulated_interval = None
+
+    def start(self):
+        assert self.start_time is None
+        self.start_time = time.time()
+
+    def end(self):
+        assert self.start_time is not None
+        self.last_interval = time.time() - self.start_time
+        self.start_time = None
+
+        # Update accumulated interval
+        if self.accumulated_interval is None:
+            self.accumulated_interval = self.last_interval
+        else:
+            self.accumulated_interval = (
+                0.9 * self.accumulated_interval + 0.1 * self.last_interval)
+
+    def get_last_interval(self):
+        return self.last_interval
+
+    def get_accumulated_interval(self):
+        return self.accumulated_interval
+
+    def get_total_time(self):
+        return time.time() - self.global_start_time

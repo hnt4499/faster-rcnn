@@ -1,4 +1,7 @@
 from tqdm import tqdm
+from loguru import logger
+
+from .utils import Timer
 
 
 def train(model, dataloader, optimizer, device, epoch=None, total_epoch=None,
@@ -24,14 +27,19 @@ def train(model, dataloader, optimizer, device, epoch=None, total_epoch=None,
         batch sizes, etc. (default: False)
     """
     model.train()
+    timer = Timer()
 
     total = 10 if testing else len(dataloader)
     with tqdm(dataloader, total=total, leave=False) as t:
         if epoch is not None and total_epoch is not None:
-            t.set_description(f"Training ({epoch}/{total_epoch})")
+            description = f"Training ({epoch}/{total_epoch})"
         else:
-            t.set_description("Training")
+            description = "Training"
+        t.set_description(description)
+
         for i, (images, bboxes, labels, image_boundaries) in enumerate(t):
+            timer.start()
+
             images = images.to(device)
             bboxes = [bbox.to(device) for bbox in bboxes]
             labels = [label.to(device) for label in labels]
@@ -49,12 +57,16 @@ def train(model, dataloader, optimizer, device, epoch=None, total_epoch=None,
             loss.backward()
             optimizer.step()
 
+            timer.end()
+            speed = timer.get_accumulated_interval()
+
             t.set_postfix(
                 loss=f"{loss.item():.4f}", loss_cls=f"{loss_cls.item():.4f}",
-                loss_reg=f"{loss_t.item():.4f}")
+                loss_reg=f"{loss_t.item():.4f}", speed=f"{speed:.3f}s/it")
 
             # Break when reaching 10 iterations when testing
             if testing and i == 9:
                 break
 
+    logger.info(f"{description} took {timer.get_total_time():.2f}s.")
     return

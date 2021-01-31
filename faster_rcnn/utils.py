@@ -151,13 +151,15 @@ def from_config(main_args=None, requires_all=False):
     main_args : str
         If specified (with "a->b" format), arguments will first be collected
         from this subconfig. If there are any arguments left, recursively find
-        them in the entire config.
+        them in the entire config. Multiple main args are to be separated by
+        ",".
     requires_all : bool
         Whether all function arguments must be found in the config.
     """
     global_main_args = main_args
     if global_main_args is not None:
-        global_main_args = global_main_args.split("->")
+        global_main_args = global_main_args.split(",")
+        global_main_args = [args.split("->") for args in global_main_args]
 
     def decorator(init):
         init_args = inspect.getfullargspec(init)[0][1:]  # excluding self
@@ -169,16 +171,21 @@ def from_config(main_args=None, requires_all=False):
             if main_args is None:
                 main_args = global_main_args
             else:
-                main_args = main_args.split("->")  # overwrite global_main_args
+                # Overwrite global_main_args
+                main_args = main_args.split(",")
+                main_args = [args.split("->") for args in main_args]
 
             collected = kwargs  # contains keyword arguments
             not_collected = [arg for arg in init_args if arg not in collected]
             # Collect from main args
             if main_args is not None:
-                sub_config = config
                 for main_arg in main_args:
-                    sub_config = sub_config[main_arg]
-                collect(sub_config, not_collected, collected)
+                    sub_config = config
+                    for arg in main_arg:
+                        sub_config = sub_config[arg]
+                    collect(sub_config, not_collected, collected)
+                    not_collected = [arg for arg in init_args
+                                     if arg not in collected]
             # Collect from the rest
             not_collected = [arg for arg in init_args if arg not in collected]
             collect(config, not_collected, collected)

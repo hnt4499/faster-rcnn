@@ -1,25 +1,22 @@
 data:
     train:
-        paths:
+        format: VOCDataset
+        info_path:
             - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_0.csv
             - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_1.csv
             - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_2.csv
             - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_3.csv
-        format: voc
-        kwargs:
-            difficult: false
+        difficult: false
     val:
-        paths:
+        format: VOCDataset
+        info_path:
             - /home/jupyter/Documents/projects/faster-rcnn/data/exp_1_five_folds/voc2007_trainval_4.csv
-        format: voc
-        kwargs:
-            difficult: false
+        difficult: false
     test:
-        paths:
+        format: VOCDataset
+        info_path:
             - /home/jupyter/Documents/projects/faster-rcnn/data/orig/voc2007_test.csv
-        format: voc
-        kwargs:
-            difficult: false
+        difficult: false
 
 model:
     backbone:
@@ -47,12 +44,13 @@ model:
         sampler_name: RandomSampler
         kwargs:
             positive_fraction: 0.5
-            # batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
+            batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
     reg_lambda: 1.0
     normalize_offsets: false
     handle_cross_boundary_boxes:  # note that the behavior during training and testing is different
         during_training: false
         during_testing: true
+
 training:
     # work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
     work_dir: null  # set to `null` to not save anything
@@ -69,6 +67,7 @@ training:
             BoxRecall: {iou_threshold: 0.5}
             MeanAverageBestOverlap: {}
             DRWinCurve: {iou_threshold: 0.5}
+
 evaluating:
     input_size: 400
     transforms_mode: simple

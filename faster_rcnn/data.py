@@ -5,18 +5,11 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
 
-
-def get_dataset(name):
-    """Get dataset initializer from its format"""
-    datasets = {
-        "voc": VOCDataset
-    }
-    if name not in datasets:
-        raise ValueError(f"Invalid dataset format. Expected one of "
-                         f"{list(datasets.keys())}, got {name} instead.")
-    return datasets[name]
+from .utils import from_config
+from .registry import register
 
 
+@register("dataset")
 class VOCDataset(Dataset):
     """PASCAL VOC dataset.
 
@@ -27,6 +20,7 @@ class VOCDataset(Dataset):
     difficult : bool
         Whether to keep difficult examples. (default: False)
     """
+    @from_config(requires_all=True)
     def __init__(self, info_path, difficult=False):
         super(VOCDataset, self).__init__()
         self.info_path = info_path

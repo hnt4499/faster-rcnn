@@ -15,22 +15,19 @@ from torch.utils.data import DataLoader
 from faster_rcnn.models import BackboneModel, RPNModel
 from faster_rcnn.train import train
 from faster_rcnn.evaluate import evaluate
-from faster_rcnn.data import get_dataset, collate_fn
+from faster_rcnn.data import collate_fn
 from faster_rcnn.transforms import get_transforms
 from faster_rcnn.metrics import MetricHolder
+from faster_rcnn.registry import registry
 
 
 DESCRIPTION = """Train and evaluate a Faster R-CNN model."""
 
 
-def initialize_dataloaders(info, collate_fn, batch_size, num_workers,
-                           shuffle=True):
-    paths = info["paths"]
-    format = info["format"]
-    kwargs = info["kwargs"]
-
-    Dataset = get_dataset(format)
-    dataset = Dataset(paths, **kwargs)
+def initialize_dataloaders(config, format, main_args, collate_fn, batch_size,
+                           num_workers, shuffle=True):
+    Dataset = registry["dataset"][format]
+    dataset = Dataset(config, main_args=main_args)
     dataloader = DataLoader(
         dataset, batch_size=batch_size, shuffle=True,
         collate_fn=collate_fn, num_workers=num_workers)
@@ -126,9 +123,11 @@ def main(args):
             collate = collate_fn_init_test
             batch_size = test_batch_size
 
+        main_args = f"data->{set_name}"
         dataloaders[set_name] = initialize_dataloaders(
-            info=set_info, collate_fn=collate, batch_size=batch_size,
-            num_workers=num_workers, shuffle=shuffle)
+            config, format=set_info["format"], main_args=main_args,
+            collate_fn=collate, batch_size=batch_size, num_workers=num_workers,
+            shuffle=shuffle)
 
     # Initialize model
     device = torch.device(device)

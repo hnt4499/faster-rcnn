@@ -143,7 +143,8 @@ def collect(config, args, collected):
 def from_config(main_args=None, requires_all=False):
     """Wrapper for all classes, which wraps `__init__` function to take in only
     a `config` dict, and automatically collect all arguments from it. An error
-    is raised when duplication is found.
+    is raised when duplication is found. Note that keyword arguments are still
+    allowed, in which case they won't be collected from `config`.
 
     Parameters
     ----------
@@ -161,7 +162,7 @@ def from_config(main_args=None, requires_all=False):
     def decorator(init):
         init_args = inspect.getfullargspec(init)[0][1:]  # excluding self
 
-        def wrapper(self, config, main_args=None):
+        def wrapper(self, config, main_args=None, **kwargs):
             # Add config to self
             self.config = config
 
@@ -170,13 +171,14 @@ def from_config(main_args=None, requires_all=False):
             else:
                 main_args = main_args.split("->")  # overwrite global_main_args
 
-            collected = {}  # contains keyword arguments
+            collected = kwargs  # contains keyword arguments
+            not_collected = [arg for arg in init_args if arg not in collected]
             # Collect from main args
             if main_args is not None:
                 sub_config = config
                 for main_arg in main_args:
                     sub_config = sub_config[main_arg]
-                collect(sub_config, init_args, collected)
+                collect(sub_config, not_collected, collected)
             # Collect from the rest
             not_collected = [arg for arg in init_args if arg not in collected]
             collect(config, not_collected, collected)

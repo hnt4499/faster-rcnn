@@ -47,7 +47,7 @@ model:
         sampler_name: RandomSampler
         kwargs:
             positive_fraction: 0.5
-            batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
+            # batch_size_per_image: 64  # don't set this too large, as negative samples will likely dominate positive samples.
     reg_lambda: 1.0
     normalize_offsets: false
     handle_cross_boundary_boxes:  # note that the behavior during training and testing is different

@@ -133,10 +133,11 @@ def from_config(main_args=None, requires_all=False):
             collect(config, not_collected, collected)
             # Validate
             if requires_all and (len(collected) != len(init_args)):
+                not_collected = [arg for arg in init_args
+                                 if arg not in collected]
                 raise RuntimeError(
                     f"Found missing argument(s) when initializing "
-                    f"{self.__class__.__name__} class. Expected {init_args}, "
-                    f"collected {list(collected.keys())}.")
+                    f"{self.__class__.__name__} class: {not_collected}.")
             # Call function
             return init(self, **collected)
         return wrapper

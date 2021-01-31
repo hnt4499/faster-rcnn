@@ -125,11 +125,10 @@ class BackboneModel(nn.Module):
                 params.requires_grad = False
 
         # Feed a dummy input to get the number of channels of the outputs.
-        # dummy_input = torch.zeros(1, 3, 600, 600, dtype=torch.float32)
-        # with torch.no_grad():
-        #     dummy_output = self(dummy_input)
-        #     self.out_channels = dummy_output.shape[1]
-        self.out_channels = 2048
+        dummy_input = torch.zeros(1, 3, 600, 600, dtype=torch.float32)
+        with torch.no_grad():
+            dummy_output = self(dummy_input)
+            self.out_channels = dummy_output.shape[1]
 
     def forward(self, inp):
         """Get feature maps.
@@ -209,7 +208,6 @@ class RPNModel(nn.Module):
                  pre_nms_top_n=2000, post_nms_top_n=100,
                  nms_iou_threshold=0.7, score_threshold=0.1, min_scale=0.01):
         super(RPNModel, self).__init__()
-        self.backbone_model = backbone_model
         self.anchor_areas = anchor_areas
         self.aspect_ratios = aspect_ratios
         self.num_anchor_boxes = len(anchor_areas) * len(aspect_ratios)
@@ -303,7 +301,8 @@ class RPNModel(nn.Module):
         Parameters
         ----------
         inp : torch.Tensor
-            Mini-batch of images.
+            Mini-batch of feature maps of shape (B, C, H, W) produced by the
+            backbone model.
         gt_boxes : list of torch.Tensor
             If specified, it should be list of size `batch_size`, where i-th
                 element of shape (x_i, 4) represents the bounding boxes'
@@ -325,8 +324,7 @@ class RPNModel(nn.Module):
         training = (gt_boxes is not None)
 
         # Get feature map
-        feature_map = self.backbone_model(inp)  # (B, C, H, W)
-        feature_map = self.relu(self.conv_sliding(feature_map))  # (B, C, H, W)
+        feature_map = self.relu(self.conv_sliding(inp))  # (B, C, H, W)
 
         batch_size, _, fm_height, fm_width = feature_map.shape
 
@@ -659,3 +657,14 @@ class RPNModel(nn.Module):
 
         mask = (box_areas / image_areas) < self.min_scale  # (B, ...)
         return mask
+
+
+class FasterRCNN(nn.Module):
+    def __init__(self, backbone, rpn_head):
+        super(FasterRCNN, self).__init__()
+        self.backbone = backbone
+        self.rpn_head = rpn_head
+
+    def forward(self, inp, **kwargs):
+        feature_map = self.backbone(inp)
+        return self.rpn_head(feature_map, **kwargs)

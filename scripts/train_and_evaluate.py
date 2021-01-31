@@ -3,6 +3,7 @@ import sys
 import json
 import argparse
 import datetime
+from pathlib import Path
 from shutil import copy, SameFileError
 from functools import partial
 
@@ -12,13 +13,14 @@ from loguru import logger
 from torch import optim
 from torch.utils.data import DataLoader
 
-from faster_rcnn.models import BackboneModel, RPNModel
+from faster_rcnn.models import BackboneModel, RPNModel, FasterRCNN
 from faster_rcnn.train import train
 from faster_rcnn.evaluate import evaluate
 from faster_rcnn.data import collate_fn
 from faster_rcnn.transforms import get_transforms
 from faster_rcnn.metrics import MetricHolder
 from faster_rcnn.registry import registry
+from faster_rcnn.utils import ConfigComparer
 
 
 DESCRIPTION = """Train and evaluate a Faster R-CNN model."""
@@ -136,38 +138,47 @@ def main(args):
     model_info["backbone_model"] = backbone_model
 
     rpn_model = RPNModel(config).to(device)
-    rpn_optimizer = optim.Adam(
-        [params for params in rpn_model.parameters() if params.requires_grad],
+    faster_rcnn = FasterRCNN(backbone_model, rpn_model)
+    optimizer = optim.Adam(
+        [params for params in faster_rcnn.parameters()
+         if params.requires_grad],
         lr=lr)
 
     if load_from is not None and resume_from is not None:
         raise ValueError(
             "`load_from` and `resume_from` are mutually exclusive.")
 
-    # # Load from a pretrained model
-    # if load_from is not None:
-    #     load_from = os.path.realpath(load_from)
-    #     logger.info(f"Loading model at {load_from}")
-    #     model.load_state_dict(torch.load(load_from, map_location=device))
-    #
-    # if resume_from is not None:
-    #     # Ensure that the two configs match (with some exclusions)
-    #     with open(os.path.join(save_dir, "config.yaml"), "r") as conf:
-    #         resume_config = yaml.load(conf, Loader=yaml.FullLoader)
-    #     if not compare_config(config, resume_config):
-    #         raise RuntimeError("The two config files do not match.")
-    #
-    #     # Load the most recent saved model
-    #     model_list = Path(save_dir).glob("model*.pth")
-    #     last_saved_model = max(model_list, key=os.path.getctime)
-    #     logger.info(f"Loading most recent saved model at {last_saved_model}")
-    #     model.load_state_dict(
-    #         torch.load(last_saved_model, map_location=device))
-    #     # Get some more info for resuming training
-    #     _, last_name = os.path.split(last_saved_model)
-    #     last_name, _ = os.path.splitext(last_name)
-    #     _, last_epoch, last_dataloader_i = last_name.split("_")
-    #     last_epoch, last_dataloader_i = int(last_epoch), int(last_dataloader_i)
+    # Load from a pretrained model
+    if load_from is not None:
+        load_from = os.path.realpath(load_from)
+        logger.info(f"Loading model at {load_from}")
+        # Ensure that the two configs match (with some exclusions)
+        load_dir, _ = os.path.split(load_from)
+        with open(os.path.join(load_dir, "config.yaml"), "r") as conf:
+            resume_config = yaml.load(conf, Loader=yaml.FullLoader)
+
+    if resume_from is not None:
+        # Ensure that the two configs match (with some exclusions)
+        with open(os.path.join(save_dir, "config.yaml"), "r") as conf:
+            resume_config = yaml.load(conf, Loader=yaml.FullLoader)
+
+        # Load the most recent saved model
+        model_list = Path(save_dir).glob("checkpoint*.pth")
+        load_from = max(model_list, key=os.path.getctime)  # last saved model
+        logger.info(f"Loading most recent saved model at {load_from}")
+        # Get some more info for resuming training
+        _, last_name = os.path.split(load_from)
+        last_name, _ = os.path.splitext(last_name)
+        last_epoch = int(last_name.split("_")[-1])
+
+    if load_from is not None:  # this also includes `resume_from`
+        compare_config = ConfigComparer(config, resume_config)
+        compare_config.compare()
+
+        checkpoint = torch.load(load_from, map_location=device)
+        backbone_model.load_state_dict(checkpoint["models"]["backbone"])
+        rpn_model.load_state_dict(checkpoint["models"]["rpn"])
+        optimizer.load_state_dict(checkpoint["optimizer"])
 
     # Copy config
     if save_dir is not None:
@@ -180,29 +191,34 @@ def main(args):
 
     # Start training and evaluating
     for epoch in range(1, num_epochs + 1):
-        # if resume_from is not None:
-        #     if epoch < last_epoch:
-        #         continue
-        #     elif epoch == last_epoch and dataloader_i <= last_dataloader_i:
-        #         continue
+        if resume_from is not None:
+            if epoch < last_epoch:
+                continue
 
         # Train
         train(
-            rpn_model, dataloaders["train"], rpn_optimizer, device,
+            faster_rcnn, dataloaders["train"], optimizer, device,
             epoch=epoch, total_epoch=num_epochs, testing=testing)
 
         # Evaluate
         evaluate(
-            rpn_model, dataloaders["val"], device, rpn_metrics=rpn_metrics,
+            faster_rcnn, dataloaders["val"], device, rpn_metrics=rpn_metrics,
             prefix=f"Validation (epoch: {epoch}/{num_epochs}): ",
             testing=testing)
 
         # Save model
         if save_dir is not None:
             save_path = os.path.join(
-                save_dir, f"model_{epoch}.pth")
-            torch.save(rpn_model.state_dict(), save_path)
-            logger.info(f"Model saved to {save_path}")
+                save_dir, f"checkpoint_{epoch}.pth")
+            checkpoint = {
+                "models": {
+                    "backbone": backbone_model.state_dict(),
+                    "rpn": rpn_model.state_dict(),
+                },
+                "optimizer": optimizer.state_dict(),
+            }
+            torch.save(checkpoint, save_path)
+            logger.info(f"Checkpoint saved to {save_path}.")
 
     # Test
     evaluate(

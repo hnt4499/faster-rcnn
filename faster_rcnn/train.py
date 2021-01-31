@@ -48,7 +48,8 @@ def train(model, dataloader, optimizer, device, epoch=None, total_epoch=None,
             optimizer.zero_grad()
 
             # Forward
-            output = model(images, bboxes, labels, image_boundaries)
+            output = model(inp=images, gt_boxes=bboxes, labels=labels,
+                           image_boundaries=image_boundaries)
             loss_cls = output["loss_cls"]
             loss_t = output["loss_t"]
             loss = output["loss"]

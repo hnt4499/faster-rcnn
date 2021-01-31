@@ -4,6 +4,8 @@ import inspect
 import torch
 import numpy as np
 
+from loguru import logger
+
 
 def smooth_l1_loss(input, target, beta=1. / 9, size_average=False):
     """Smmoth L1 loss, as defined in the Fast R-CNN paper.
@@ -72,6 +74,53 @@ def index_batch(x, idxs):
 def batching(function, inp):
     """Apply a function along the batch axis"""
     return [function(inp_i) for inp_i in inp]
+
+
+def raise_or_warn(action, msg):
+    if action == "raise":
+        raise ValueError(msg)
+    else:
+        print("aaaa")
+        logger.warning(msg)
+
+
+class ConfigComparer:
+    """Compare two config dictionaries. Useful for checking when resuming from
+    previous session."""
+
+    _to_raise_error = [
+        "model->backbone->model_name", "model->kernel_size",
+        "model->num_channels", "model->normalize_offsets",
+        "model->handle_cross_boundary_boxes->during_training",
+    ]
+    _to_warn = [
+        "data", "model->anchor_areas", "model->aspect_ratios",
+        "model->handle_cross_boundary_boxes->during_testing",
+        "training->input_size", "evaluating->input_size",
+        "evaluating->post_process->rpn"
+    ]
+
+    def __init__(self, cfg_1, cfg_2):
+        self.cfg_1 = cfg_1
+        self.cfg_2 = cfg_2
+
+    def compare(self):
+        for components, action in \
+                [(self._to_raise_error, "raise"), (self._to_warn, "warn")]:
+            for component in components:
+                curr_scfg_1, curr_scfg_2 = self.cfg_1, self.cfg_2  # subconfigs
+                for key in component.split("->"):
+                    if key not in curr_scfg_1 or key not in curr_scfg_2:
+                        raise ValueError(
+                            f"Component {component} not found in config file.")
+                    curr_scfg_1 = curr_scfg_1[key]
+                    curr_scfg_2 = curr_scfg_2[key]
+                if curr_scfg_1 != curr_scfg_2:
+                    msg = (f"Component {component} is different between "
+                           f"two config files\nConfig 1: {curr_scfg_1}\n"
+                           f"Config 2: {curr_scfg_2}.")
+                    raise_or_warn(action, msg)
+        return True
 
 
 def collect(config, args, collected):

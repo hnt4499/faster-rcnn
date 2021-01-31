@@ -35,7 +35,7 @@ def evaluate(model, dataloader, device, prefix="", testing=False,
             image_boundaries = image_boundaries.to(device)
 
             # Forward
-            output = model(images, gt_boxes=None, labels=None,
+            output = model(inp=images, gt_boxes=None, labels=None,
                            image_boundaries=image_boundaries)
             tot_gt_boxes.extend(bboxes)
             tot_gt_labels.extend(labels)

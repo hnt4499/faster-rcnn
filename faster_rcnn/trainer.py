@@ -152,7 +152,8 @@ class Trainer:
             # Get some more info for resuming training
             _, last_name = os.path.split(load_from)
             last_name, _ = os.path.splitext(last_name)
-            self.start_epoch = int(last_name.split("_")[-1])
+            self.start_epoch = int(last_name.split("_")[-1]) + 1
+        self.load_from = load_from
 
         if load_from is not None:  # this also includes `resume_from`
             compare_config = ConfigComparer(self.config, resume_config)
@@ -180,9 +181,9 @@ class Trainer:
             logger.info(f"Checkpoint saved to {save_path}.")
 
     @from_config(requires_all=True)
-    def _train(self, load_from, num_epochs, testing=False):
+    def _train(self, num_epochs, testing=False):
         # Evaluate model before training starts
-        if load_from is not None:
+        if self.load_from is not None:
             logger.info("Running validation before training...")
             evaluate(
                 self.faster_rcnn, self.dataloaders["val"], self.device,

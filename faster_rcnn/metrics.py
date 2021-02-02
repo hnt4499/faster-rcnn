@@ -170,7 +170,6 @@ class DRWinCurve(BaseMetric):
         super(DRWinCurve, self).__init__()
         self.config = config
         self.iou_threshold = iou_threshold
-        self.curr_i = 0  # used to name file
 
     def call(self, gt_boxes, pred_boxes, pred_objectness, iou_matrices=None):
         assert len(gt_boxes) == len(pred_boxes) == len(pred_objectness)
@@ -249,11 +248,11 @@ class DRWinCurve(BaseMetric):
     def _plot(self, x, y, label):
         # Save path
         save_dir = self.config["training"]["save_dir"]
-        if save_dir is None:
+        if save_dir is None or "epoch" not in self.config:
             return
 
-        save_path = os.path.join(save_dir, f"DRWinCurve_{self.curr_i}.jpg")
-        self.curr_i += 1
+        save_path = os.path.join(
+            save_dir, f"DRWinCurve_{self.config['epoch']}.jpg")
 
         plt.plot(x, y, label=label)
         plt.xscale('log')

@@ -55,6 +55,7 @@ class Trainer:
         self._initialize_models(self.config)
 
         # Set additional attributes
+        self.config["trainer"] = self
         self.rpn_metrics = rpn_metrics
 
     @from_config(requires_all=True)
@@ -181,6 +182,10 @@ class Trainer:
             torch.save(checkpoint, save_path)
             logger.info(f"Checkpoint saved to {save_path}.")
 
+    def _set_epoch(self, epoch):
+        self.epoch = epoch
+        self.config["epoch"] = epoch
+
     @from_config(requires_all=True)
     def _train(self, num_epochs, testing=False):
         # Evaluate model before training starts
@@ -192,8 +197,8 @@ class Trainer:
                 prefix="Validation (before training): ")
 
         # Start training and evaluating
-        for epoch in range(self.start_epoch, num_epochs + 1):
-            self.epoch = epoch
+        for epoch in range(self.start_epoch, num_epochs):
+            self._set_epoch(epoch)
 
             # Train
             train(

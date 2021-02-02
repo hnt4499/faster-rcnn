@@ -4,6 +4,7 @@ import torch
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset
+from torch.utils.data import DataLoader as TorchDataLoader
 
 from .utils import from_config
 from .registry import register
@@ -143,3 +144,12 @@ def collate_fn(batch, transforms):
     images_trans = torch.stack(images_trans, dim=0)
     image_boundaries = torch.stack(image_boundaries, dim=0)
     return images_trans, bboxess_trans, labelss_trans, image_boundaries
+
+
+class DataLoader(TorchDataLoader):
+    @from_config(requires_all=False)
+    def __init__(self, dataset, batch_size=16, shuffle=True, num_workers=1,
+                 collate_fn=None, **kwargs):
+        super(DataLoader, self).__init__(
+            dataset=dataset, batch_size=batch_size, shuffle=shuffle,
+            num_workers=num_workers, collate_fn=collate_fn, **kwargs)

@@ -21,9 +21,9 @@ from faster_rcnn.utils import from_config, ConfigComparer
 class Trainer:
     @from_config(requires_all=True)
     def __init__(self, train_collate_fn, test_collate_fn, rpn_metrics,
-                 work_dir, config_path, resume_from=None):
+                 config_path):
         # Get save dir
-        self._get_save_dir(work_dir, resume_from)
+        self._get_save_dir(self.config)
         # Get logger
         self._get_logger()
         # Print config
@@ -57,6 +57,7 @@ class Trainer:
         # Set additional attributes
         self.rpn_metrics = rpn_metrics
 
+    @from_config(requires_all=True)
     def _get_save_dir(self, work_dir, resume_from):
         # Get save directory
         if resume_from is None:

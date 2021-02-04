@@ -254,6 +254,10 @@ class RPNModel(nn.Module):
             torch.nn.init.normal_(layer.weight, std=0.01)
             torch.nn.init.constant_(layer.bias, 0)
 
+    """
+    Helper functions
+    """
+
     def _normalize_box_offsets(self, boxes):
         """Normmalize box offsets (not box coordinates) using pre-defined mean
         and variance. This is to ensure the regression loss (which depends on
@@ -295,203 +299,6 @@ class RPNModel(nn.Module):
         if is_list:
             return torch.split(boxes, num_boxes, dim=0)
         return boxes
-
-    def forward(self, inp, gt_boxes=None, labels=None, image_boundaries=None):
-        """
-        Parameters
-        ----------
-        inp : torch.Tensor
-            Mini-batch of feature maps of shape (B, C, H, W) produced by the
-            backbone model.
-        gt_boxes : list of torch.Tensor
-            If specified, it should be list of size `batch_size`, where i-th
-                element of shape (x_i, 4) represents the bounding boxes'
-                coordinates (xmin, ymin, xmax, ymax) of the i-th image, and x_i
-                is the number of boxes of the i-th image.
-            If not specified, the function will return a list of proposal boxes
-            and its scores, as is during inference.
-        labels
-            Not important. It is specified just to ensure a consistent
-            arguments across different models.
-        image_boundaries : torch.Tensor
-            Tensor of shape (batch_size, 4) representing original image
-            boundaries in the transformed images as a bounding box. This is
-            used to filter out cross-boundary anchors during training, and to
-            clip predicted boxes during inference. If not specified, this code
-            assumes the original image boundaries to be the transformed
-            images'.
-        """
-        training = (gt_boxes is not None)
-
-        # Get feature map
-        feature_map = self.relu(self.conv_sliding(inp))  # (B, C, H, W)
-
-        batch_size, _, fm_height, fm_width = feature_map.shape
-
-        # Feed forward; `A` denotes the number of anchor boxes at each
-        # receptive point.
-        pred_t = self.box_regression(feature_map)  # (B, A * 4, H, W)
-        pred_t = pred_t.permute(0, 2, 3, 1).reshape(
-            batch_size, -1, 4)  # (B, H * W * A, 4)
-        pred_cls = self.cls_probs(feature_map)  # (B, A, H, W)
-        pred_cls = self.sigmoid(pred_cls).permute(0, 2, 3, 1).reshape(
-            batch_size, -1)  # (B, H * W * A)
-
-        # Get anchor boxes for this feature map
-        anchor_boxes = get_anchor_boxes(
-            (fm_width, fm_height),
-            self.anchor_areas, self.aspect_ratios
-        ).to(inp.device)  # (H * W * A, 4)
-        # Scale the anchor x, y coordinates back to the original image sizes
-        anchor_boxes[:, :2] = self.scale_fm_to_input(anchor_boxes[:, :2])
-        # Convert from xywh to xyxy
-        anchor_boxes = convert_xywh_to_xyxy(anchor_boxes)
-        anchor_boxes = anchor_boxes.repeat(
-            batch_size, 1, 1)  # (B, H * W * A, 4)
-
-        # This will be used if `handle_cross_boundary_boxes` is True
-        if image_boundaries is None:
-            image_boundaries = torch.tensor(
-                [0, 0, inp.shape[3], inp.shape[2]]
-            ).repeat(inp.shape[0], 1)  # (B, 4)
-
-        if training:
-            # Get a mask to filter out-of-image (cross_boundary) anchor boxes
-            valid_anchor_mask = self._get_anchor_mask(
-                anchor_boxes, image_boundaries, training=True
-            )  # (B, H * W * A)
-            # Get a mask to filter images whose anchor boxes are all invalid
-            batch_mask = self._get_batch_mask(valid_anchor_mask)  # (B,)
-            # Filter images whose anchor boxes are all invalid
-            anchor_boxes, pred_t, pred_cls, valid_anchor_mask = [
-                tensor[~batch_mask] for tensor in
-                [anchor_boxes, pred_t, pred_cls, valid_anchor_mask]
-            ]
-            gt_boxes = [
-                gt_box for gt_box, m in zip(gt_boxes, batch_mask) if not m]
-            # Filter out-of-image anchor boxes; each of the resulting objects
-            # is a list of size `batch_size'`, where `batch_size'` <=
-            # `batch_size`, and where each i-th element if either of shape
-            # (A_i,) or (A_i, 4) where A_i is the number of valid anchor boxes.
-            anchor_boxes, pred_t, pred_cls = [
-                apply_mask(tensor, valid_anchor_mask) for tensor in
-                [anchor_boxes, pred_t, pred_cls]
-            ]
-
-            # Map each groundtruth with its corresponding anchor box(es)
-            # labels: list of size `batch_size`, where each element is of shape
-            # (A_i,)
-            # matched_gt_boxes: list of size `batch_size`, where each element
-            # is of shape (A_i, 4)
-            labels, matched_gt_boxes = self._label_anchors(
-                gt_boxes, anchor_boxes)
-
-            # Calculate gt boxes' offsets and normalize
-            # gt_t: list of size `batch_size`, where each element is of shape
-            # (A_i, 4)
-            gt_t = convert_coords_to_offsets(
-                batching(convert_xyxy_to_xywh, matched_gt_boxes),
-                batching(convert_xyxy_to_xywh, anchor_boxes))
-            gt_t = self._normalize_box_offsets(gt_t)
-
-            # sampled_pos_inds and sampled_neg_inds: list of size `batch_size`,
-            # where each element is of shape (A_i,)
-            sampled_pos_inds, sampled_neg_inds = self.sampler(
-                anchor_labels=labels, pred_objectness=pred_cls)
-
-            # sampled_pos_inds: (S_pos,); sampled_neg_inds: (S_neg,), where
-            # S_pos, S_neg are the total number positive and negative examples
-            # in the entire batch, respectively.
-            sampled_pos_inds = torch.where(
-                torch.cat(sampled_pos_inds, dim=0))[0]
-            sampled_neg_inds = torch.where(
-                torch.cat(sampled_neg_inds, dim=0))[0]
-
-            sampled_inds = torch.cat(
-                [sampled_pos_inds, sampled_neg_inds],
-                dim=0)  # (S_pos + S_neg,)
-
-            labels = torch.cat(labels, dim=0)  # (Σ A_i,)
-            gt_t = torch.cat(gt_t, dim=0)  # (Σ A_i, 4)
-            pred_cls = torch.cat(pred_cls, dim=0)  # (Σ A_i,)
-            pred_t = torch.cat(pred_t, dim=0)  # (Σ A_i, 4)
-
-            loss_regression = smooth_l1_loss(
-                pred_t[sampled_pos_inds],
-                gt_t[sampled_pos_inds],
-                beta=1 / 9,
-                size_average=False,
-            ) / (sampled_inds.numel())
-            loss_cls = F.binary_cross_entropy_with_logits(
-                pred_cls[sampled_inds], labels[sampled_inds]
-            )
-            loss = loss_cls + self.reg_lambda * loss_regression
-
-            output = {
-                "loss_t": loss_regression, "loss_cls": loss_cls, "loss": loss
-            }
-            return output
-
-        else:
-            # Get top_n before NMS
-            _, idxs = torch.topk(
-                pred_cls, k=min(self.pre_nms_top_n, pred_cls.shape[-1]),
-                dim=-1, largest=True, sorted=True)  # (B, N_pre)
-            anchor_boxes = index_argsort(
-                anchor_boxes, idxs, dim=1)  # (B, N_pre, 4)
-            pred_t = index_argsort(pred_t, idxs, dim=1)  # (B, N_pre, 4)
-            pred_cls = index_argsort(pred_cls, idxs, dim=1)  # (B, N_pre)
-
-            # Un-normalize predicted offsets
-            pred_t = self._inv_normalize_box_offsets(
-                pred_t)  # (B, N_pre, 4)
-
-            # Convert offsets to coordinates
-            pred_boxes = convert_offsets_to_coords(
-                pred_t, convert_xyxy_to_xywh(anchor_boxes))  # (B, N_pre, 4)
-            pred_boxes = convert_xywh_to_xyxy(pred_boxes)
-            # Clip to feature map boundary
-            pred_boxes = self._clip_boxes_to_image_boundary(
-                pred_boxes, image_boundaries, mode="xyxy")  # (B, N_pre, 4)
-
-            # Remove small or low scoring boxes; pred_boxes and pred_cls:
-            # lists of size `batch_size`, where each element corresponds
-            # to each image in the batch.
-            mask_small = self._get_small_boxes_mask(
-                pred_boxes, image_boundaries)  # (B, N_pre)
-            mask_low_score = pred_cls < self.score_threshold  # (B, N_pre)
-            mask = mask_small | mask_low_score
-            pred_boxes = apply_mask(pred_boxes, mask)
-            pred_cls = apply_mask(pred_cls, mask)
-
-            # Perform NMS; keep_idxs: list of size `batch_size`, where each
-            # element is a tensor of indices to keep for each image.
-            keep_idxs = batched_nms(
-                pred_boxes, pred_cls, self.nms_iou_threshold)
-            # Index NMS results; pred_boxes and pred_cls are both list of
-            # size `batch_size`, where each element corresponds to each image.
-            pred_boxes = index_batch(pred_boxes, keep_idxs)
-            pred_cls = index_batch(pred_cls, keep_idxs)
-
-            # Limit the number of output predictions per image
-            new_pred_boxes = []
-            new_pred_cls = []
-            for pred_boxes_per_image, pred_cls_per_image in \
-                    zip(pred_boxes, pred_cls):
-                k = min(self.post_nms_top_n, pred_cls_per_image.shape[-1])
-                new_pred_cls_per_image, idxs = torch.topk(
-                    pred_cls_per_image, k=k, dim=-1,
-                    largest=True, sorted=True)
-                new_pred_boxes_per_image = pred_boxes_per_image[idxs]
-
-                new_pred_boxes.append(new_pred_boxes_per_image)
-                new_pred_cls.append(new_pred_cls_per_image)
-
-            output = {
-                "pred_boxes": new_pred_boxes, "pred_probs": new_pred_cls
-            }
-
-        return output
 
     def _get_anchor_mask(self, anchor_boxes, image_boundaries, training):
         """Get mask with True indicating anchor boxes to ignore and False
@@ -586,8 +393,9 @@ class RPNModel(nn.Module):
         Parameters
         ----------
         boxes : torch.Tensor
-            Tensor of shape (B, ..., 4), where `...` could be any of number of
-            dimensions.
+            Tensor of shape (B, ..., 4) or list of size `batch_size`, where
+            each element is a tensor of shape (..., 4), where `...` could be
+            any of number of dimensions.
         image_boundaries : torch.Tensor
             Tensor of shape (B, 4) representing the original image boundaries
             as bounding boxes in the transformed batch.
@@ -601,6 +409,7 @@ class RPNModel(nn.Module):
             raise ValueError("Invalid mode value. Expected one of "
                              "['xyxy', 'xywh'], got {} instead".format(mode))
 
+        is_list = isinstance(boxes, (list, tuple))
         if mode == "xywh":
             # Convert to xyxy
             boxes = convert_xywh_to_xyxy(boxes)
@@ -626,16 +435,23 @@ class RPNModel(nn.Module):
 
             new_boxes.append(new_boxes_per_image)
 
-        return torch.stack(new_boxes, dim=0)
+        if not is_list:
+            new_boxes = torch.stack(new_boxes, dim=0)
+        return new_boxes
 
-    def _get_small_boxes_mask(self, boxes, image_boundaries):
-        """Get mask to filter small boxes.
+    def _remove_unsatisfactory_boxes(self, boxes, cls, image_boundaries):
+        """Remove unsatisfactory boxes, including small boxes and low scoring
+        boxes.
 
         Parameters
         ----------
         boxes : torch.Tensor
-            Tensor of shape (B, ..., 4), where `...` could be any of number of
-            dimensions. xyxy formatted.
+            Tensor of shape (B, ..., 4) or list of size `batch_size`, where
+            each element is a tensor of shape (..., 4),, where `...` could be
+            any of number of dimensions. xyxy formatted.
+        cls : torch.Tensor
+            Tensor of shape (B, ...) denoting the predicted scores for each
+            box.
         image_boundaries : torch.Tensor
             Tensor of shape (B, 4) representing the original image boundaries
             as bounding boxes in the transformed batch.
@@ -647,16 +463,333 @@ class RPNModel(nn.Module):
             Shaped (B, ...), where `...` corresponds to that of `boxes`.
         """
         assert len(boxes) == len(image_boundaries)
-        box_areas = box_area(boxes, mode="xyxy")  # (B, ...)
-        image_areas = box_area(
-            image_boundaries, mode="xyxy")  # (B,)
+        is_list = isinstance(boxes, (list, tuple))
+        if not is_list:
+            boxes = [boxes]
+            cls = [cls]
+            image_boundaries = [image_boundaries]
 
-        num_dim_to_add = box_areas.ndim - 1
-        new_view = [image_areas.shape[0]] + [1] * num_dim_to_add
-        image_areas = image_areas.view(*new_view).expand_as(box_areas)
+        new_boxes, new_cls = [], []
+        for boxes_i, cls_i, image_boundaries_i in \
+                zip(boxes, cls, image_boundaries):
+            box_areas_i = box_area(boxes_i, mode="xyxy")  # (...)
+            image_areas_i = box_area(image_boundaries_i, mode="xyxy")  # scalar
 
-        mask = (box_areas / image_areas) < self.min_scale  # (B, ...)
-        return mask
+            # Need to resize during inference, where we are processing a BATCH
+            # of image (i.e., is_list == False and
+            # `boxes_i.shape[0] == batch_size`)
+            if image_areas_i.ndim > 0:
+                num_dim_to_add = box_areas_i.ndim - 1
+                new_view = [image_areas_i.shape[0]] + [1] * num_dim_to_add
+                image_areas_i = image_areas_i.view(*new_view).expand_as(
+                    box_areas_i)
+
+            mask_small_i = (
+                (box_areas_i / image_areas_i) < self.min_scale)  # (...)
+            mask_low_score_i = cls_i < self.score_threshold  # (...)
+            mask = mask_small_i | mask_low_score_i
+
+            if is_list:
+                boxes_i = boxes_i[mask]
+                cls_i = cls_i[mask]
+            else:
+                boxes_i = apply_mask(boxes_i, mask)
+                cls_i = apply_mask(cls_i, mask)
+
+            new_boxes.append(boxes_i)
+            new_cls.append(cls_i)
+
+        if not is_list:
+            new_boxes = new_boxes[0]
+            new_cls = new_cls[0]
+
+        return new_boxes, new_cls
+
+    """
+    Main functions, which combine logics and multiple helper functions
+    """
+
+    def _forward(self, inp):
+        """Feed forward"""
+        # Get feature map
+        feature_map = self.relu(self.conv_sliding(inp))  # (B, C, H, W)
+        batch_size, _, fm_height, fm_width = feature_map.shape
+
+        # `A` denotes the number of anchor boxes at each receptive point.
+        pred_cls = self.cls_probs(feature_map)  # (B, A, H, W)
+        pred_cls = self.sigmoid(pred_cls).permute(0, 2, 3, 1).reshape(
+            batch_size, -1)  # (B, H * W * A)
+        pred_t = self.box_regression(feature_map)  # (B, A * 4, H, W)
+        pred_t = pred_t.permute(0, 2, 3, 1).reshape(
+            batch_size, -1, 4)  # (B, H * W * A, 4)
+
+        return feature_map, pred_cls, pred_t
+
+    def _get_anchor_boxes(self, fm_width, fm_height, batch_size, device):
+        # Get anchor boxes for this feature map
+        anchor_boxes = get_anchor_boxes(
+            (fm_width, fm_height),
+            self.anchor_areas, self.aspect_ratios
+        ).to(device)  # (H * W * A, 4)
+        # Scale the anchor x, y coordinates back to the original image sizes
+        anchor_boxes[:, :2] = self.scale_fm_to_input(anchor_boxes[:, :2])
+        # Convert from xywh to xyxy
+        anchor_boxes = convert_xywh_to_xyxy(anchor_boxes)
+        anchor_boxes = anchor_boxes.repeat(
+            batch_size, 1, 1)  # (B, H * W * A, 4)
+
+        return anchor_boxes  # (B, H * W * A, 4)
+
+    def _nms_pre_process(self, gt_boxes, image_boundaries, anchor_boxes,
+                         pred_cls, pred_t):
+        """This applies pre-processing steps to boxes before NMS is applied.
+        During training:
+            This function handles all anchor boxes that cross image boundaries
+            by either removing them all or clip to image boundaries, depending
+            on whether it is training or testing, and on the settings.
+            This function also filters out all images whose respective anchor
+            boxes are **all** filtered out in the previous step.
+
+        During inference
+            This function limit the number of anchor boxes per image.
+        """
+        if gt_boxes is not None:  # during training
+            # Get a mask to filter out-of-image (cross_boundary) anchor boxes
+            valid_anchor_mask = self._get_anchor_mask(
+                anchor_boxes, image_boundaries, training=True
+            )  # (B, H * W * A)
+            # Get a mask to filter images whose anchor boxes are all invalid
+            batch_mask = self._get_batch_mask(valid_anchor_mask)  # (B,)
+            # Filter images whose anchor boxes are all invalid
+            anchor_boxes, pred_t, pred_cls, valid_anchor_mask = [
+                tensor[~batch_mask] for tensor in
+                [anchor_boxes, pred_t, pred_cls, valid_anchor_mask]
+            ]
+            gt_boxes = [
+                gt_box for gt_box, m in zip(gt_boxes, batch_mask) if not m]
+            # Filter out-of-image anchor boxes; each of the resulting objects
+            # is a list of size `batch_size'`, where `batch_size'` <=
+            # `batch_size`, and where each i-th element if either of shape
+            # (A_i,) or (A_i, 4) where A_i is the number of valid anchor boxes.
+            anchor_boxes, pred_t, pred_cls = [
+                apply_mask(tensor, valid_anchor_mask) for tensor in
+                [anchor_boxes, pred_t, pred_cls]
+            ]
+        else:  # during inference
+            # Get top_n before NMS
+            _, idxs = torch.topk(
+                pred_cls, k=min(self.pre_nms_top_n, pred_cls.shape[-1]),
+                dim=-1, largest=True, sorted=True)  # (B, N_pre)
+            anchor_boxes = index_argsort(
+                anchor_boxes, idxs, dim=1)  # (B, N_pre, 4)
+            pred_t = index_argsort(pred_t, idxs, dim=1)  # (B, N_pre, 4)
+            pred_cls = index_argsort(pred_cls, idxs, dim=1)  # (B, N_pre)
+
+            # Un-normalize predicted offsets
+            pred_t = self._inv_normalize_box_offsets(
+                pred_t)  # (B, N_pre, 4)
+
+        return gt_boxes, anchor_boxes, pred_cls, pred_t
+
+    def _get_predicted_boxes(self, image_boundaries, anchor_boxes, pred_cls,
+                             pred_t):
+        """
+        Get predicted boxes from anchor boxes and predicted offsets.
+        The tensor shapes annotated in below also apply to list of tensors
+        (during training, where each image might have different number of
+        anchor boxes).
+        """
+        # Convert offsets to coordinates
+        pred_boxes = convert_offsets_to_coords(
+            pred_t, convert_xyxy_to_xywh(anchor_boxes)
+        )  # (B, N_pre, 4)
+        pred_boxes = convert_xywh_to_xyxy(pred_boxes)
+        # Clip to feature map boundary
+        pred_boxes = self._clip_boxes_to_image_boundary(
+            pred_boxes, image_boundaries, mode="xyxy")  # (B, N_pre, 4)
+
+        # Remove small or low scoring boxes; pred_boxes and pred_cls:
+        # lists of size `batch_size`, where each element corresponds
+        # to each image in the batch.
+        pred_boxes, pred_cls = self._remove_unsatisfactory_boxes(
+            pred_boxes, pred_cls, image_boundaries)
+
+        return pred_boxes, pred_cls
+
+    def _compute_losses(self, gt_boxes, anchor_boxes, pred_cls, pred_t):
+        """Compute loss given the filtered groundtruth boxes (`gt_boxes`),
+        anchor boxes (`anchor_boxes`), predicted probabilities (`pred_cls`)
+        and predicted box offsets (`pred_t`).
+
+        The behavior is as follow:
+            If `gt_boxes` is None, meaning it is inference step, immediately
+            end this step and return an empty dict since we don't need loss
+            during inference.
+            Otherwise
+                1. Each anchor will be assigned to either one or zero
+                groundtruth box.
+                2. Compute (and normalize) groundtruth box offsets.
+                3. Sample positive/negative examples.
+                4. Compute losses.
+        """
+        if gt_boxes is None:
+            return {}
+
+        # Map each groundtruth with its corresponding anchor box(es)
+        # labels: list of size `batch_size`, where each element is of shape
+        # (A_i,)
+        # matched_gt_boxes: list of size `batch_size`, where each element
+        # is of shape (A_i, 4)
+        labels, matched_gt_boxes = self._label_anchors(
+            gt_boxes, anchor_boxes)
+
+        # Calculate gt boxes' offsets and normalize
+        # gt_t: list of size `batch_size`, where each element is of shape
+        # (A_i, 4)
+        gt_t = convert_coords_to_offsets(
+            batching(convert_xyxy_to_xywh, matched_gt_boxes),
+            batching(convert_xyxy_to_xywh, anchor_boxes))
+        gt_t = self._normalize_box_offsets(gt_t)
+
+        # sampled_pos_inds and sampled_neg_inds: list of size `batch_size`,
+        # where each element is of shape (A_i,)
+        sampled_pos_inds, sampled_neg_inds = self.sampler(
+            anchor_labels=labels, pred_objectness=pred_cls)
+
+        # sampled_pos_inds: (S_pos,); sampled_neg_inds: (S_neg,), where
+        # S_pos, S_neg are the total number positive and negative examples
+        # in the entire batch, respectively.
+        sampled_pos_inds = torch.where(
+            torch.cat(sampled_pos_inds, dim=0))[0]
+        sampled_neg_inds = torch.where(
+            torch.cat(sampled_neg_inds, dim=0))[0]
+
+        sampled_inds = torch.cat(
+            [sampled_pos_inds, sampled_neg_inds],
+            dim=0)  # (S_pos + S_neg,)
+
+        labels = torch.cat(labels, dim=0)  # (Σ A_i,)
+        gt_t = torch.cat(gt_t, dim=0)  # (Σ A_i, 4)
+        pred_cls = torch.cat(pred_cls, dim=0)  # (Σ A_i,)
+        pred_t = torch.cat(pred_t, dim=0)  # (Σ A_i, 4)
+
+        loss_t = smooth_l1_loss(
+            pred_t[sampled_pos_inds],
+            gt_t[sampled_pos_inds],
+            beta=1 / 9,
+            size_average=False
+        ) / (sampled_inds.numel())
+        loss_cls = F.binary_cross_entropy_with_logits(
+            pred_cls[sampled_inds], labels[sampled_inds])
+        loss = loss_cls + self.reg_lambda * loss_t
+
+        return {"loss_t": loss_t, "loss_cls": loss_cls, "loss": loss}
+
+    def _nms_post_process(self, pred_boxes, pred_cls):
+        """Limit the number of output predictions per image"""
+        new_pred_boxes = []
+        new_pred_cls = []
+        for pred_boxes_per_image, pred_cls_per_image in \
+                zip(pred_boxes, pred_cls):
+            k = min(self.post_nms_top_n, pred_cls_per_image.shape[-1])
+            new_pred_cls_per_image, idxs = torch.topk(
+                pred_cls_per_image, k=k, dim=-1,
+                largest=True, sorted=True)
+            new_pred_boxes_per_image = pred_boxes_per_image[idxs]
+
+            new_pred_boxes.append(new_pred_boxes_per_image)
+            new_pred_cls.append(new_pred_cls_per_image)
+
+        return new_pred_boxes, new_pred_cls
+
+    """
+    Master function.
+    """
+
+    def forward(self, inp, gt_boxes=None, labels=None, image_boundaries=None):
+        """
+        Parameters
+        ----------
+        inp : torch.Tensor
+            Mini-batch of feature maps of shape (B, C, H, W) produced by the
+            backbone model.
+        gt_boxes : list of torch.Tensor
+            If specified, it should be list of size `batch_size`, where i-th
+                element of shape (x_i, 4) represents the bounding boxes'
+                coordinates (xmin, ymin, xmax, ymax) of the i-th image, and x_i
+                is the number of boxes of the i-th image.
+            If not specified, the function will return a list of proposal boxes
+            and its scores, as is during inference.
+        labels
+            Not important. It is specified just to ensure a consistent
+            arguments across different models.
+        image_boundaries : torch.Tensor
+            Tensor of shape (batch_size, 4) representing original image
+            boundaries in the transformed images as a bounding box. This is
+            used to filter out cross-boundary anchors during training, and to
+            clip predicted boxes during inference. If not specified, this code
+            assumes the original image boundaries to be the transformed
+            images'.
+        """
+        output = {}
+
+        """Forward step"""
+        feature_map, pred_cls, pred_t = self._forward(inp)
+        batch_size, _, fm_height, fm_width = feature_map.shape
+
+        anchor_boxes = self._get_anchor_boxes(
+            fm_width, fm_height, batch_size, inp.device)  # (B, H * W * A, 4)
+
+        # This will be used if `handle_cross_boundary_boxes` is True
+        if image_boundaries is None:
+            image_boundaries = torch.tensor(
+                [0, 0, inp.shape[3], inp.shape[2]]
+            ).repeat(inp.shape[0], 1).to(anchor_boxes)  # (B, 4)
+
+        """Pre-process before NMS.
+        Training:
+            Each of the resulting objects is a list of size `batch_size'`,
+            where `batch_size'` <= `batch_size`, and where each i-th
+            element if either of shape (A_i,) or (A_i, 4) where A_i is the
+            number of valid anchor boxes.
+        Inference:
+            Each of the resulting objects is a Tensor of shape (B, N_pre)
+            or (B, N_pre, 4).
+        """
+        out = self._nms_pre_process(
+            gt_boxes, image_boundaries, anchor_boxes, pred_cls, pred_t)
+        gt_boxes, anchor_boxes, pred_cls, pred_t = out
+
+        """Compute loss; this does nothing during inference"""
+        losses = self._compute_losses(
+            gt_boxes, anchor_boxes, pred_cls, pred_t)
+        output.update(losses)
+
+        """Get predicted boxes"""
+        with torch.no_grad():
+            """Get raw predicted boxes"""
+            pred_boxes, pred_cls = self._get_predicted_boxes(
+                image_boundaries, anchor_boxes, pred_cls, pred_t)
+
+            """Perform NMS"""
+            # keep_idxs: list of size `batch_size`, where each element is a
+            # tensor of indices to keep for each image.
+            keep_idxs = batched_nms(
+                pred_boxes, pred_cls, self.nms_iou_threshold)
+            # Index NMS results; pred_boxes and pred_cls are both list of
+            # size `batch_size`, where each element corresponds to each image.
+            pred_boxes = index_batch(pred_boxes, keep_idxs)
+            pred_cls = index_batch(pred_cls, keep_idxs)
+
+            """
+            Post-process, which limits the number of output predictions per
+            image.
+            """
+            pred_boxes, pred_cls = self._nms_post_process(pred_boxes, pred_cls)
+            out = {"pred_boxes": pred_boxes, "pred_probs": pred_cls}
+            output.update(out)
+
+        return output
 
 
 class FasterRCNN(nn.Module):

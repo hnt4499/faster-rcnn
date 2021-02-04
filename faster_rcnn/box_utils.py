@@ -45,18 +45,80 @@ def get_anchor_boxes(feature_map_size, anchor_areas, aspect_ratios):
     return torch.tensor(anchor_boxes, dtype=torch.float32)
 
 
+def batching_wrapper(*arg_idxs):
+    """Merge the boxes along the batch axis, let the `func` function do
+    whatever it does, and split back to the original sizes
+
+    Parameters
+    ----------
+    arg_idxs : list[int]
+        List of argument indices to be wrapped.
+    """
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            arg_idxs_args = [i for i in arg_idxs if i < len(args)]
+            arg_idxs_kwargs = [i - len(args) for i in arg_idxs
+                               if i >= len(args)]
+
+            # Wrap positional arguments
+            ele_len_all = None
+            is_list_all = False
+            new_args = []
+            for i, arg in enumerate(args):
+                if i in arg_idxs_args:
+                    assert isinstance(arg, (list, tuple, torch.Tensor))
+                    # If not Tensor, concatenate along the batch axis
+                    is_list = isinstance(arg, (list, tuple))
+                    # If there is at least one list, output is split again
+                    is_list_all = is_list or is_list_all
+
+                    if is_list:
+                        ele_len = [len(ele) for ele in arg]
+                        if ele_len_all is None:
+                            ele_len_all = ele_len
+                        else:
+                            # Elements' length this must be same across inputs
+                            assert ele_len_all == ele_len
+                        arg = torch.cat(arg, dim=0)
+                new_args.append(arg)
+
+            # Wrap keyword arguments
+            new_kwargs = {}
+            for i, (key, value) in enumerate(kwargs.items()):
+                if i in arg_idxs_kwargs:
+                    assert isinstance(value, (list, tuple, torch.Tensor))
+                    # If not Tensor, concatenate along the batch axis
+                    is_list = isinstance(value, (list, tuple))
+                    # If there is at least one list, output is split again
+                    is_list_all = is_list or is_list_all
+
+                    if is_list:
+                        ele_len = [len(ele) for ele in value]
+                        if ele_len_all is None:
+                            ele_len_all = ele_len
+                        else:
+                            # Elements' length this must be same across inputs
+                            assert ele_len_all == ele_len
+                        value = torch.cat(value, dim=0)
+                new_kwargs[key] = value
+
+            # Forward
+            output = func(*new_args, **new_kwargs)
+            assert isinstance(output, torch.Tensor)
+
+            # Un-wrap
+            if is_list_all:
+                assert ele_len_all is not None
+                output = torch.split(output, ele_len_all, dim=0)
+
+            return output
+        return wrapper
+    return decorator
+
+
+@batching_wrapper(0, 1)
 def convert_coords_to_offsets(boxes, anchor_boxes):
     """Convert (calculate) box coordinates to box offsets."""
-    is_list = isinstance(boxes, (list, tuple))
-    if is_list:
-        num_boxes = [len(box) for box in boxes]
-        boxes = torch.cat(boxes, dim=0)
-
-        if not isinstance(anchor_boxes, (list, tuple)):
-            anchor_boxes = [
-                anchor_boxes.clone() for _ in range(len(num_boxes))]
-        anchor_boxes = torch.cat(anchor_boxes, dim=0)
-
     num_dims = boxes.ndim
     x, y, w, h = torch.split(boxes, 1, dim=-1)  # box
     x_a, y_a, w_a, h_a = torch.split(anchor_boxes, 1, dim=-1)  # anchors
@@ -68,23 +130,12 @@ def convert_coords_to_offsets(boxes, anchor_boxes):
 
     boxes_offsets = torch.cat([tx, ty, tw, th], dim=num_dims - 1)
 
-    if is_list:
-        return torch.split(boxes_offsets, num_boxes, dim=0)
     return boxes_offsets
 
 
+@batching_wrapper(0, 1)
 def convert_offsets_to_coords(offsets, anchor_boxes):
     """Convert (calculate) box offsets to box coordinates."""
-    is_list = isinstance(offsets, (list, tuple))
-    if is_list:
-        num_boxes = [len(box) for box in offsets]
-        offsets = torch.cat(offsets, dim=0)
-
-        if not isinstance(anchor_boxes, (list, tuple)):
-            anchor_boxes = [
-                anchor_boxes.clone() for _ in range(len(num_boxes))]
-        anchor_boxes = torch.cat(anchor_boxes, dim=0)
-
     num_dims = offsets.ndim
     tx, ty, tw, th = torch.split(offsets, 1, dim=-1)  # box
     x_a, y_a, w_a, h_a = torch.split(anchor_boxes, 1, dim=-1)  # anchors
@@ -96,11 +147,10 @@ def convert_offsets_to_coords(offsets, anchor_boxes):
 
     boxes = torch.cat([x, y, w, h], dim=num_dims - 1)
 
-    if is_list:
-        return torch.split(boxes, num_boxes, dim=0)
     return boxes
 
 
+@batching_wrapper(0)
 def convert_xywh_to_xyxy(boxes):
     """
     Parameters
@@ -123,6 +173,7 @@ def convert_xywh_to_xyxy(boxes):
     return boxes_xyxy
 
 
+@batching_wrapper(0)
 def convert_xyxy_to_xywh(boxes):
     """
     Parameters
@@ -145,6 +196,7 @@ def convert_xyxy_to_xywh(boxes):
     return boxes_xywh
 
 
+@batching_wrapper(0)
 def box_area(boxes, mode):
     if mode not in ["xyxy", "xywh"]:
         raise ValueError("Invalid mode value. Expected one of "

@@ -55,9 +55,16 @@ class BaseMetric:
         """Used to log results"""
         raise NotImplementedError
 
+    def write_to_tensorboard(self, writer):
+        writer.add_scalar(
+            self._metric_name, self.last_value,
+            display_name=self._metric_description)
+
 
 @register("metric")
 class BoxRecall(BaseMetric):
+    _metric_name = "box_recall"
+    _metric_description = "Box Recall"
     """Calculate box recall for class-agnostic task.
 
     Parameters
@@ -98,6 +105,8 @@ class BoxRecall(BaseMetric):
 
 @register("metric")
 class MeanAverageBestOverlap(BaseMetric):
+    _metric_name = "mABO"
+    _metric_description = "Mean Average Best Overlap (mABO)"
     """Calculate mean average best overlap (MABO).
 
     Reference:
@@ -155,6 +164,8 @@ class MeanAverageBestOverlap(BaseMetric):
 
 @register("metric")
 class DRWinCurve(BaseMetric):
+    _metric_name = "auc"
+    _metric_description = "Area Under the DR-#WIN Curve"
     """Plot the DR-#WIN curve (detection-rate (recall) versus the number of
     windows per image) and calculate area under the DR-#WIN curve approximated
     in a log space (to avoid bias towards too many predicted boxes). Note that
@@ -274,6 +285,7 @@ class MetricHolder:
         self.metrics_config = metrics_config
         self.all_config = all_config
         self.last_result_str = None
+
         self.metrics = {}
         for metric_name, metric_config in metrics_config.items():
             metric_initialized = registry["metric"][metric_name](
@@ -341,3 +353,7 @@ class MetricHolder:
 
     def get_str(self):
         return self.last_result_str
+
+    def write_to_tensorboard(self, writer):
+        for metric_name, metric in self.metrics.items():
+            metric.write_to_tensorboard(writer)

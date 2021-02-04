@@ -52,8 +52,9 @@ model:
         during_testing: true
 
 training:
-    # work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
-    work_dir: null  # set to `null` to not save anything
+    work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
+    # work_dir: null  # set to `null` to not save anything
+    use_tensorboard: true  # this does not have effect with `work_dir` is null
     input_size: 400  # the `anchor_areas` and `input_size` are directly dependent of each other
     transforms_mode: simple  # refer to `faster_rcnn.transforms.get_transforms`
     device: cuda

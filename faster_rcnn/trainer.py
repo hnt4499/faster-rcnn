@@ -5,17 +5,17 @@ import datetime
 from pathlib import Path
 from shutil import copy, SameFileError
 
+from tqdm import tqdm
 import torch
 import yaml
 from loguru import logger
 from torch import optim
 
 from faster_rcnn.models import BackboneModel, RPNModel, FasterRCNN
-from faster_rcnn.train import train
-from faster_rcnn.evaluate import evaluate
 from faster_rcnn.data import DataLoader
 from faster_rcnn.registry import registry
-from faster_rcnn.utils import from_config, ConfigComparer
+from faster_rcnn.utils import from_config, ConfigComparer, Timer
+from faster_rcnn.tensorboard import get_writer
 
 
 class Trainer:
@@ -54,7 +54,11 @@ class Trainer:
         # Initialize models, optimizers and load state dicts (if possible)
         self._initialize_models(self.config)
 
+        # Initialize tensorboard writer
+        self._initialize_tensorboard_writer(self.config)
+
         # Set additional attributes
+        self._set_epoch(self.start_epoch - 1)  # training not yet started
         self.config["trainer"] = self
         self.rpn_metrics = rpn_metrics
 
@@ -167,6 +171,12 @@ class Trainer:
             self.rpn_model.load_state_dict(checkpoint["models"]["rpn"])
             self.optimizer.load_state_dict(checkpoint["optimizer"])
 
+    @from_config(main_args="training", requires_all=True)
+    def _initialize_tensorboard_writer(self, save_dir, use_tensorboard):
+        if not use_tensorboard:
+            save_dir = None
+        self.writer = get_writer(save_dir)
+
     def _save_models(self):
         # Save model
         if self.save_dir is not None:
@@ -186,14 +196,121 @@ class Trainer:
         self.epoch = epoch
         self.config["epoch"] = epoch
 
-    @from_config(requires_all=True)
+    def train_one_epoch(self, model, dataloader, optimizer, num_epochs,
+                        testing=False):
+        """Train the model for one epoch."""
+        model.train()
+        timer = Timer()
+
+        total = 10 if testing else len(dataloader)
+        with tqdm(dataloader, total=total, leave=False) as t:
+            if num_epochs is not None:
+                description = f"Training ({self.epoch}/{num_epochs})"
+            else:
+                description = "Training"
+            t.set_description(description)
+
+            for i, (images, bboxes, labels, image_boundaries) in enumerate(t):
+                timer.start()
+                self.writer.set_step(step=i, mode="train")
+
+                images = images.to(self.device)
+                bboxes = [bbox.to(self.device) for bbox in bboxes]
+                labels = [label.to(self.device) for label in labels]
+                image_boundaries = image_boundaries.to(self.device)
+
+                optimizer.zero_grad()
+
+                # Forward
+                output = model(inp=images, gt_boxes=bboxes, labels=labels,
+                               image_boundaries=image_boundaries)
+                loss_cls = output["loss_cls"]
+                loss_t = output["loss_t"]
+                loss = output["loss"]
+
+                # Backward
+                loss.backward()
+                optimizer.step()
+
+                timer.end()
+                speed = timer.get_accumulated_interval()
+
+                t.set_postfix(
+                    loss=f"{loss.item():.4f}",
+                    loss_cls=f"{loss_cls.item():.4f}",
+                    loss_reg=f"{loss_t.item():.4f}",
+                    speed=f"{speed:.3f}s/it"
+                )
+
+                # Write to tensorboard necessary information
+                global_step = self.epoch * total + i
+                self.writer.set_step(step=global_step, mode="train")
+                self.writer.add_scalar(
+                    "loss", loss.item(), display_name="Total RPN loss")
+                self.writer.add_scalar(
+                    "loss_cls", loss_cls.item(),
+                    display_name="RPN classification loss")
+                self.writer.add_scalar(
+                    "loss_t", loss_t.item(),
+                    display_name="RPN regression loss")
+
+                # Break when reaching 10 iterations when testing
+                if testing and i == 9:
+                    break
+
+        logger.info(f"{description} took {timer.get_total_time():.2f}s.")
+        return
+
+    def evaluate_one_epoch(self, model, dataloader, prefix, testing,
+                           write_to_tensorboard=False):
+        """Evaluate the model for one epoch."""
+        model.eval()
+        tot_gt_boxes = []
+        tot_gt_labels = []
+        tot_pred_boxes = []
+        tot_pred_objectness = []
+
+        with torch.no_grad():
+            for i, (images, bboxes, labels, image_boundaries) in \
+                    enumerate(dataloader):
+                images = images.to(self.device)
+                bboxes = [bbox.to(self.device) for bbox in bboxes]
+                labels = [label.to(self.device) for label in labels]
+                image_boundaries = image_boundaries.to(self.device)
+
+                # Forward
+                output = model(inp=images, gt_boxes=None, labels=None,
+                               image_boundaries=image_boundaries)
+                tot_gt_boxes.extend(bboxes)
+                tot_gt_labels.extend(labels)
+                tot_pred_boxes.extend(output["pred_boxes"])
+                tot_pred_objectness.extend(output["pred_probs"])
+
+                # Break when reaching 10 iterations when testing
+                if testing and i == 9:
+                    break
+
+        metric_results = self.rpn_metrics(
+            tot_gt_boxes, tot_gt_labels, tot_pred_boxes,
+            tot_pred_objectness, pred_classes=None)
+        results = ", ".join(self.rpn_metrics.get_str())
+        logger.info(f"{prefix}{results}")
+
+        # Write to tensorboard necessary information
+        if self.epoch >= 0 and write_to_tensorboard:
+            self.writer.set_step(step=self.epoch, mode="val")
+            self.rpn_metrics.write_to_tensorboard(self.writer)
+
+        model.train()
+        return metric_results
+
+    @from_config(main_args="training", requires_all=True)
     def _train(self, num_epochs, testing=False):
         # Evaluate model before training starts
         if self.load_from is not None:
             logger.info("Running validation before training...")
-            evaluate(
-                self.faster_rcnn, self.dataloaders["val"], self.device,
-                rpn_metrics=self.rpn_metrics, testing=testing,
+            self.evaluate_one_epoch(
+                self.faster_rcnn, self.dataloaders["val"], testing=testing,
                 prefix="Validation (before training): ")
 
         # Start training and evaluating
@@ -201,24 +318,23 @@ class Trainer:
             self._set_epoch(epoch)
 
             # Train
-            train(
+            self.train_one_epoch(
                 self.faster_rcnn, self.dataloaders["train"], self.optimizer,
-                self.device, epoch=epoch, total_epoch=num_epochs,
-                testing=testing)
+                num_epochs=num_epochs, testing=testing)
 
             # Evaluate
-            evaluate(
-                self.faster_rcnn, self.dataloaders["val"], self.device,
-                rpn_metrics=self.rpn_metrics, testing=testing,
-                prefix=f"Validation (epoch: {epoch}/{num_epochs}): ")
+            self.evaluate_one_epoch(
+                self.faster_rcnn, self.dataloaders["val"], testing=testing,
+                prefix=f"Validation (epoch: {epoch}/{num_epochs}): ",
+                write_to_tensorboard=True)
 
             # Checkpoint
             self._save_models()
 
         # Test
-        evaluate(
-            self.rpn_model, self.dataloaders["test"], self.device,
-            rpn_metrics=self.rpn_metrics, prefix="Test: ")
+        self.evaluate_one_epoch(
+            self.faster_rcnn, self.dataloaders["test"], epoch=None,
+            prefix="Test: ", write_to_tensorboard=False)
         logger.info("Training finished.")
 
     def train(self):

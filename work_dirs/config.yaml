@@ -54,7 +54,6 @@ model:
 training:
     work_dir: /home/jupyter/Documents/projects/faster-rcnn/work_dirs/  # set to `null` to not save anything
     # work_dir: null  # set to `null` to not save anything
-    use_tensorboard: true  # this does not have effect with `work_dir` is null
     input_size: 400  # the `anchor_areas` and `input_size` are directly dependent of each other
     transforms_mode: simple  # refer to `faster_rcnn.transforms.get_transforms`
     device: cuda
@@ -83,3 +82,15 @@ evaluating:
             nms_iou_threshold: 0.7  # IOU threshold during NMS
             score_threshold: 0.1  # boxes with objectness score smaller than this will be removed
             min_scale: 0.01  # fraction of box width/height to image width/height
+
+tensorboard:
+    enabled: true  # this does not have effect with `work_dir` is null
+    plot_gt_pred_comparison:  # plot groundtruth and prediction comparison
+        during_training:
+            enabled: true
+            interval: 50  # draw every `interval` iterations (batches)
+            num_boxes: 10  # top k predicted boxes to be drawn for each image
+        during_testing:
+            enabled: true
+            interval: 10
+            num_boxes: 10

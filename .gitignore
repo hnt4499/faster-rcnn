@@ -13,3 +13,6 @@ __pycache__/
 
 # Working directory
 work_dirs/202*
+
+# Temporary files
+tmp/*

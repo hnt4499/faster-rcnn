@@ -98,7 +98,7 @@ class TensorboardWriter:
             # Draw best overlapped boxes
             pred_probs = data["pred_probs"][0].cpu()
             iou = box_iou(gt_boxes, pred_boxes)
-            idxs = torch.argsort(iou, dim=-1, descending=True)[:, 0]
+            idxs = torch.argmax(iou, dim=-1)
 
             best_overlap_boxes = torch.index_select(
                 pred_boxes, dim=0, index=idxs)

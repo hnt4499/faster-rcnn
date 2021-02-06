@@ -490,8 +490,8 @@ class RPNModel(nn.Module):
             mask = mask_small_i | mask_low_score_i
 
             if is_list:
-                boxes_i = boxes_i[mask]
-                cls_i = cls_i[mask]
+                boxes_i = boxes_i[~mask]
+                cls_i = cls_i[~mask]
             else:
                 boxes_i = apply_mask(boxes_i, mask)
                 cls_i = apply_mask(cls_i, mask)

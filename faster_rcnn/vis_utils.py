@@ -86,8 +86,8 @@ def draw_box_on_image(image, box, label=None, color=(0, 255, 0),
             thickness=font_thickness, lineType=cv2.LINE_AA)
 
 
-def draw_boxes_on_image(image, boxes, labels=None, color=(0, 255, 0),
-                        line_thickness=None):
+def draw_boxes_on_image(image, boxes, labels=None, image_boundary=None,
+                        color=(0, 255, 0), line_thickness=None):
     """Plot multiple bounding boxes on image
 
     Parameters
@@ -98,17 +98,26 @@ def draw_boxes_on_image(image, boxes, labels=None, color=(0, 255, 0),
         Numpy array of shape (N, 4), where N is the number of boxes.
     labels : list-like or None
         List-like object of size N, where N is the number of boxes.
-    color : tuple or None
-        Tuple of three R, G, B values.
+    image_boundary : np.ndarray or None
+        Numpy array of shape (4,) denoting the original image boundary as a
+        bounding box in the transformed image.
+    color : tuple or or list[tuple] or None
+        Tuple of three R, G, B values, or list of N tuples.
     line_thickness: int or None
     """
     if line_thickness is None:
         line_thickness = round(  # line/font thickness
             0.001 * (image.shape[0] + image.shape[1]) / 2) + 1
+    if labels is None:
+        labels = [None] * len(boxes)
+    if isinstance(color, tuple) or color is None:
+        color = [color] * len(boxes)
 
-    for i, box in enumerate(boxes):
-        label = None if labels is None else labels[i]
-        draw_box_on_image(image, box, label, color, line_thickness)
+    image, boxes = crop_to_image_boundary(image, boxes, image_boundary)
+
+    for box_i, labels_i, color_i in zip(boxes, labels, color):
+        draw_box_on_image(image, box_i, labels_i, color_i, line_thickness)
+    return image
 
 
 def draw_multiple_box_sets_comparison(
@@ -154,8 +163,8 @@ def draw_multiple_box_sets_comparison(
     for boxes_i, labels_i, colors_i, line_thickness_i in \
             zip(boxes, labels, colors, line_thickness):
         image_i = image.copy()
-        draw_boxes_on_image(image_i, boxes_i, labels_i, colors_i,
-                            line_thickness_i)
+        draw_boxes_on_image(image_i, boxes_i, labels_i, image_boundary=None,
+                            color=colors_i, line_thickness=line_thickness_i)
 
         drawn_images.append(torch.from_numpy(image_i).permute(2, 0, 1))
 

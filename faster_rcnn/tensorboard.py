@@ -1,8 +1,10 @@
 from datetime import datetime
 
+import torch
+from torchvision.ops import box_iou
 from tensorboardX import SummaryWriter
 
-from .vis_utils import draw_multiple_box_sets_comparison
+from .vis_utils import draw_multiple_box_sets_comparison, draw_boxes_on_image
 
 
 class TensorboardWriter:
@@ -83,14 +85,38 @@ class TensorboardWriter:
             image = (image * 255).astype("uint8")
 
             image_boundary = data["image_boundaries"][0].cpu().numpy()
-            gt_boxes = data["gt_boxes"][0].cpu().numpy()
-            pred_boxes = data["pred_boxes"][0].cpu().numpy()[:num_boxes]
+            gt_boxes = data["gt_boxes"][0].cpu()
+            pred_boxes = data["pred_boxes"][0].cpu()
 
+            # Draw top predicted boxes, side by side with the gt boxes
             grid = draw_multiple_box_sets_comparison(
-                image=image, boxes=[gt_boxes, pred_boxes], labels=None,
-                image_boundary=image_boundary, ncol=2,
-                colors=[(0, 255, 0), (0, 0, 255)])
+                image=image.copy(), labels=None, image_boundary=image_boundary,
+                boxes=[gt_boxes.numpy(), pred_boxes.numpy()[:num_boxes]],
+                ncol=2, colors=[(0, 255, 0), (0, 0, 255)])
             self.add_image("gt_vs_pred", grid)
+
+            # Draw best overlapped boxes
+            pred_probs = data["pred_probs"][0].cpu()
+            iou = box_iou(gt_boxes, pred_boxes)
+            idxs = torch.argsort(iou, dim=-1, descending=True)[:, 0]
+
+            best_overlap_boxes = torch.index_select(
+                pred_boxes, dim=0, index=idxs)
+            best_overlap_scores = pred_probs[idxs].tolist()
+            best_overlap_scores = [f"{s:.2f}" for s in best_overlap_scores]
+
+            # Labels and colors
+            all_boxes = torch.cat([gt_boxes, best_overlap_boxes], dim=0)
+            labels = [None] * len(gt_boxes) + best_overlap_scores
+            colors = ([(0, 255, 0)] * len(gt_boxes)
+                      + [(0, 0, 255)] * len(pred_boxes))
+
+            drawn = draw_boxes_on_image(
+                image.copy(), all_boxes.numpy(), labels=labels,
+                image_boundary=image_boundary, color=colors,
+                line_thickness=None)
+            self.add_image(
+                "best_overlaps", torch.from_numpy(drawn).permute(2, 0, 1))
 
     def write_one_step_train(self, data, step):
         self.set_step(step=step, mode="train")

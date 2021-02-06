@@ -170,8 +170,7 @@ class RPNModel(nn.Module):
         backbone model. (default: 3, as in the paper)
     num_channels : int
         Number of channels of the n x n conv layer and two 1 x 1 sibling conv
-        layers. Note that 1 x 1 conv layers are implemented as linear layers.
-        (default: 512, as in the paper)
+        layers. (default: 512, as in the paper)
     sampler_name : str
         Positive/negative sampler name. (default: "random_sampler")
     positive_fraction : float
@@ -196,6 +195,17 @@ class RPNModel(nn.Module):
         Note that similar to `normalize_offsets`, this setting is mentioned in
         the Faster R-CNN paper, but is ignored in `torchvision`.
         (default: {"during_training": False, "during_testing": True})
+    pre_nms_top_n : int
+        Number of boxes to keep before NMS.
+    post_nms_top_n : int
+        Number of boxes to keep after NMS.
+    nms_iou_threshold : float
+        IoU threshold to use for NMS.
+    score_threshold : float
+        Bounding boxes with score lower than this threshold will be discarded.
+    min_scale : float
+        Bounding boxes with area ratio to the image lower than this threshold
+        will be discarded.
     """
     @from_config(main_args="model", requires_all=True)
     def __init__(self, backbone_model, anchor_areas, aspect_ratios,

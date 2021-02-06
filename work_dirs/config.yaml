@@ -61,7 +61,7 @@ training:
     batch_size: 16
     num_epochs: 1000
     num_workers: 1
-    testing: false  # set to 'true' to perform only 10 iterations per epoch
+    testing: true  # set to 'true' to perform only 10 iterations per epoch
     metrics:
         rpn:
             BoxRecall: {iou_threshold: 0.5}

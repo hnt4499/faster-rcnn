@@ -181,6 +181,12 @@ class DRWinCurve(BaseMetric):
         super(DRWinCurve, self).__init__()
         self.config = config
         self.iou_threshold = iou_threshold
+        self.cache = None
+        # Used to set limits on the x axis of the plot. Only record the first
+        # value and set limit to be (1.2 * this_value). Note that the number of
+        # windows generally decreases as training progresses, so this
+        # workaround make senses.
+        self._tot_num_wins = None
 
     def call(self, gt_boxes, pred_boxes, pred_objectness, iou_matrices=None):
         assert len(gt_boxes) == len(pred_boxes) == len(pred_objectness)
@@ -247,12 +253,14 @@ class DRWinCurve(BaseMetric):
         auc = sum(recalls) / len(recalls)
 
         # Plot
-        self._plot(spaces, recalls, label=f"auc={auc:.4f}")
+        fig = self._plot(spaces, recalls, label=f"auc={auc:.4f}")
 
-        return {"auc": auc, "num_windows": spaces, "recall_scores": recalls}
+        return {"auc": auc, "num_windows": spaces, "recall_scores": recalls,
+                "fig": fig}
 
     def __call__(self, *args, **kwargs):
         outp = self.call(*args, **kwargs)
+        self.cache = outp
         self.last_value = outp["auc"]
         return outp
 
@@ -264,19 +272,30 @@ class DRWinCurve(BaseMetric):
 
         save_path = os.path.join(
             save_dir, f"DRWinCurve_{self.config['epoch']}.jpg")
+        if self._tot_num_wins is None:
+            self._tot_num_wins = round(1.2 * int(x.max()))
 
-        plt.plot(x, y, label=label)
-        plt.xscale('log')
-        plt.xlabel("# windows (log)")
-        plt.ylabel("recall")
-        plt.title("DR-#WIN curve")
-        plt.legend(loc="lower right")
+        fig = plt.figure(figsize=(15, 8))
+        axes = plt.axes()
+        axes.plot(x, y, label=label)
+        axes.set(
+            xscale="log", xlabel="# windows (log)", ylabel="recall",
+            title="DR-#WIN curve", xlim=[1, self._tot_num_wins],
+            ylim=[0.0, 1.0])
+        axes.legend(loc="lower right")
+
+        # Save fig
         plt.savefig(save_path)
-        plt.close()
         logger.info(f"Figure saved to {save_path}.")
+        return fig
 
     def get_str(self):
         return f"area(DR-#WIN): {self.last_value:.4f}"
+
+    def write_to_tensorboard(self, writer):
+        super(DRWinCurve, self).write_to_tensorboard(writer)
+        writer.add_figure("DR-#Win Curve", self.cache["fig"])
+        plt.close()
 
 
 class MetricHolder:

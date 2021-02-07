@@ -269,32 +269,36 @@ class Trainer:
         tot_pred_objectness = []
 
         with torch.no_grad():
-            for i, (images, bboxes, labels, image_boundaries) in \
-                    enumerate(dataloader):
-                images = images.to(self.device)
-                bboxes = [bbox.to(self.device) for bbox in bboxes]
-                labels = [label.to(self.device) for label in labels]
-                image_boundaries = image_boundaries.to(self.device)
+            total = 10 if testing else len(dataloader)
+            with tqdm(dataloader, total=total, leave=False) as t:
+                t.set_description(prefix)
 
-                # Forward
-                output = model(inp=images, gt_boxes=None, labels=None,
-                               image_boundaries=image_boundaries)
-                tot_gt_boxes.extend(bboxes)
-                tot_gt_labels.extend(labels)
-                tot_pred_boxes.extend(output["pred_boxes"])
-                tot_pred_objectness.extend(output["pred_probs"])
+                for i, (images, bboxes, labels, image_boundaries) in \
+                        enumerate(t):
+                    images = images.to(self.device)
+                    bboxes = [bbox.to(self.device) for bbox in bboxes]
+                    labels = [label.to(self.device) for label in labels]
+                    image_boundaries = image_boundaries.to(self.device)
 
-                output.update({"images": images, "gt_boxes": bboxes,
-                               "image_boundaries": image_boundaries})
-                global_step = self.epoch * len(dataloader) + i
+                    # Forward
+                    output = model(inp=images, gt_boxes=None, labels=None,
+                                   image_boundaries=image_boundaries)
+                    tot_gt_boxes.extend(bboxes)
+                    tot_gt_labels.extend(labels)
+                    tot_pred_boxes.extend(output["pred_boxes"])
+                    tot_pred_objectness.extend(output["pred_probs"])
 
-                if mode is not None:
-                    self.writer.write_one_step(
-                        output, global_step, mode, rpn_metrics=None)
+                    output.update({"images": images, "gt_boxes": bboxes,
+                                   "image_boundaries": image_boundaries})
+                    global_step = self.epoch * len(dataloader) + i
 
-                # Break when reaching 10 iterations when testing
-                if testing and i == 9:
-                    break
+                    if mode is not None:
+                        self.writer.write_one_step(
+                            output, global_step, mode, rpn_metrics=None)
+
+                    # Break when reaching 10 iterations when testing
+                    if testing and i == 9:
+                        break
 
         metric_results = self.rpn_metrics(
             tot_gt_boxes, tot_gt_labels, tot_pred_boxes,

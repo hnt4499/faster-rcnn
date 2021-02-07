@@ -179,11 +179,12 @@ class Trainer:
             save_dir = None
         self.writer = get_writer(save_dir, plot_gt_pred_comparison)
 
-    def _save_models(self):
+    def _save_models(self, filename=None):
         # Save model
         if self.save_dir is not None:
-            save_path = os.path.join(
-                self.save_dir, f"checkpoint_{self.epoch}.pth")
+            if filename is None:
+                filename = f"checkpoint_{self.epoch}.pth"
+            save_path = os.path.join(self.save_dir, filename)
             checkpoint = {
                 "models": {
                     "backbone": self.backbone_model.state_dict(),
@@ -258,7 +259,7 @@ class Trainer:
         logger.info(f"{description} took {timer.get_total_time():.2f}s.")
         return
 
-    def evaluate_one_epoch(self, model, dataloader, prefix, testing, mode,
+    def evaluate_one_epoch(self, model, dataloader, prefix, testing, mode=None,
                            write_to_tensorboard=False):
         """Evaluate the model for one epoch."""
         model.eval()
@@ -286,8 +287,10 @@ class Trainer:
                 output.update({"images": images, "gt_boxes": bboxes,
                                "image_boundaries": image_boundaries})
                 global_step = self.epoch * len(dataloader) + i
-                self.writer.write_one_step(
-                    output, global_step, mode, rpn_metrics=None)
+
+                if mode is not None:
+                    self.writer.write_one_step(
+                        output, global_step, mode, rpn_metrics=None)
 
                 # Break when reaching 10 iterations when testing
                 if testing and i == 9:
@@ -303,6 +306,10 @@ class Trainer:
         if self.epoch >= 0 and write_to_tensorboard:
             self.writer.write_one_step(
                 {}, self.epoch, mode, rpn_metrics=self.rpn_metrics)
+
+        # Early stopping
+        self._is_best = self.rpn_metrics.is_best()
+        self._stop = self.rpn_metrics.stop()
 
         model.train()
         return metric_results
@@ -334,9 +341,20 @@ class Trainer:
             # Checkpoint
             self._save_models()
 
+            # Best model
+            if self._is_best:
+                self._save_models(filename="checkpoint_best.pth")
+
+            # Early stopping
+            if self._stop:
+                early_stopping = self.config["training"]["early_stopping"]
+                logger.info(f"Model not improved over {early_stopping} "
+                            f"epochs. Stopping...")
+                break
+
         # Test
         self.evaluate_one_epoch(
-            self.faster_rcnn, self.dataloaders["test"], epoch=None,
+            self.faster_rcnn, self.dataloaders["test"], testing=False,
             prefix="Test: ", mode="test", write_to_tensorboard=False)
         logger.info("Training finished.")
 

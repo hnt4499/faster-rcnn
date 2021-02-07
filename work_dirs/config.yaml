@@ -64,9 +64,10 @@ training:
     testing: true  # set to 'true' to perform only 10 iterations per epoch
     metrics:
         rpn:
-            BoxRecall: {iou_threshold: 0.5}
+            BoxRecall: {iou_threshold: 0.5}  # the first metric will be used for early stopping
             MeanAverageBestOverlap: {}
             DRWinCurve: {iou_threshold: 0.5}
+    early_stopping: 3  # stop training when model is not improved over this number of epochs
 
 evaluating:
     input_size: 400
@@ -78,7 +79,7 @@ evaluating:
                 low_threshold: 0.3
                 allow_low_quality_matches: true
             pre_nms_top_n: 2000  # number of boxes to keep before NMS
-            post_nms_top_n: 500  # number of boxes to keep after NMS
+            post_nms_top_n: 300  # number of boxes to keep after NMS
             nms_iou_threshold: 0.7  # IOU threshold during NMS
             score_threshold: 0.1  # boxes with objectness score smaller than this will be removed
             min_scale: 0.01  # fraction of box width/height to image width/height

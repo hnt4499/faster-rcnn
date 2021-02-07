@@ -305,6 +305,12 @@ class MetricHolder:
         self.all_config = all_config
         self.last_result_str = None
 
+        # For early stopping and recording best model
+        self.early_stopping = all_config["training"].get(
+            "early_stopping", None)
+        self._first_metric_max = 0
+        self._first_metric_no_improve = 0
+
         self.metrics = {}
         for metric_name, metric_config in metrics_config.items():
             metric_initialized = registry["metric"][metric_name](
@@ -356,7 +362,7 @@ class MetricHolder:
         results = {}
         self.last_result_str = []
 
-        for metric_name, metric in self.metrics.items():
+        for i, (metric_name, metric) in enumerate(self.metrics.items()):
             # Selectively call metric with its arguments
             kwargs = {}
             call_args = inspect.getfullargspec(
@@ -368,6 +374,15 @@ class MetricHolder:
             results[metric_name] = result
             self.last_result_str.append(metric.get_str())
 
+            if i == 0:
+                if result > self._first_metric_max:
+                    self._first_metric_max = result
+                    self._first_metric_is_best = True
+                    self._first_metric_no_improve = 0
+                else:
+                    self._first_metric_is_best = False
+                    self._first_metric_no_improve += 1
+
         return results
 
     def get_str(self):
@@ -376,3 +391,14 @@ class MetricHolder:
     def write_to_tensorboard(self, writer):
         for metric_name, metric in self.metrics.items():
             metric.write_to_tensorboard(writer)
+
+    def is_best(self):
+        """Whether the current run results in the best metric value."""
+        return self._first_metric_is_best
+
+    def stop(self):
+        """Whether to early stop training."""
+        if (self.early_stopping is not None
+                and self._first_metric_no_improve > self.early_stopping):
+            return True
+        return False

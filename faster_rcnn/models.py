@@ -802,6 +802,152 @@ class RPNModel(nn.Module):
         return output
 
 
+class FastRCNN(nn.Module):
+    """Fast R-CNN component in Faster R-CNN, as proposed in:
+        Ren, S., He, K., Girshick, R., & Sun, J. (2015). Faster R-CNN: Towards
+        Real-Time Object Detection with Region Proposal Networks.
+
+    This shares the same backbone (`BackboneModel`) with RPN model.
+
+    Parameters
+    ----------
+    backbone_model : BackboneModel
+        Initialized backbone model.
+    kernel_size : int
+        Size of the n x n conv layer right after the last conv layer of the
+        backbone model. (default: 3, as in the paper)
+    num_channels : int
+        Number of channels of the n x n conv layer and two 1 x 1 sibling conv
+        layers. (default: 512, as in the paper)
+    sampler_name : str
+        Positive/negative sampler name. (default: "random_sampler")
+    positive_fraction : float
+        The fraction of number of postive samples per image batch.
+        (default: 0.5)
+    batch_size_per_image : int
+        Number of boxes (positive + negative) per image as inputs.
+        (default: 256)
+    reg_lambda : float
+        Weight for regression loss, given that the weight for classification is
+        1.0 (i.e., `final_loss = loss_cls + reg_lambda * loss_t`).
+    normalize_offsets : bool
+        Whether to normalize box offsets as in the original paper. Note that
+        in `torchvision`, offsets are NOT normalized, so this is False by
+        default.
+    handle_cross_boundary_boxes : bool
+        Whether to clip predicted boxes to image boundaries. (default: True)
+    pre_nms_top_n : int
+        Number of boxes to keep before NMS.
+    post_nms_top_n : int
+        Number of boxes to keep after NMS.
+    nms_iou_threshold : float
+        IoU threshold to use for NMS.
+    score_threshold : float
+        Bounding boxes with score lower than this threshold will be discarded.
+    min_scale : float
+        Bounding boxes with area ratio to the image lower than this threshold
+        will be discarded.
+    """
+    @from_config(main_args="model", requires_all=True)
+    def __init__(self, backbone_model,
+                 kernel_size=3, num_channels=512,
+                 sampler_name="random_sampler",
+                 positive_fraction=0.5, batch_size_per_image=256,
+                 reg_lambda=1.0, normalize_offsets=False,
+                 handle_cross_boundary_boxes=True,
+                 pre_nms_top_n=2000, post_nms_top_n=100,
+                 nms_iou_threshold=0.7, score_threshold=0.1, min_scale=0.01):
+        super(RPNModel, self).__init__()
+        self.kernel_size = kernel_size
+        self.num_channels = num_channels
+        self.sampler = registry["sampler"][sampler_name](self.config)
+        self.reg_lambda = reg_lambda
+        self.normalize_offsets = normalize_offsets
+        self.handle_cross_boundary_boxes = handle_cross_boundary_boxes
+
+        # Post-processing
+        self.pre_nms_top_n = pre_nms_top_n
+        self.post_nms_top_n = post_nms_top_n
+        self.nms_iou_threshold = nms_iou_threshold
+        self.score_threshold = score_threshold
+        self.min_scale = min_scale
+
+        # Box matcher
+        self.box_matcher = Matcher(self.config)
+
+        # Get RoI transformation function
+        self.scale_input_to_fm = get_roi_stat(backbone_model.model_type)
+        self.scale_fm_to_input = get_orig_stat(backbone_model.model_type)
+
+        # Box offsets' mean and std
+        # Source: https://github.com/jwyang/faster-rcnn.pytorch/blob/f9d984d27b48a067b29792932bcb5321a39c1f09/lib/model/utils/config.py#L117
+        self.offsets_mean = torch.tensor(
+            [0.0, 0.0, 0.0, 0.0], dtype=torch.float32)
+        self.offsets_std = torch.tensor(
+            [0.1, 0.1, 0.2, 0.2], dtype=torch.float32)
+
+        # Additional layers
+        self.conv_sliding = nn.Conv2d(
+            in_channels=backbone_model.out_channels, out_channels=num_channels,
+            kernel_size=kernel_size, padding=kernel_size // 2)
+        self.relu = nn.ReLU()
+        self.box_regression = nn.Conv2d(
+            num_channels, self.num_anchor_boxes * 4, kernel_size=1, stride=1)
+        self.cls_probs = nn.Conv2d(
+            num_channels, self.num_anchor_boxes, kernel_size=1, stride=1)
+        self.sigmoid = nn.Sigmoid()
+
+        for layer in [self.conv_sliding, self.box_regression, self.cls_probs]:
+            torch.nn.init.normal_(layer.weight, std=0.01)
+            torch.nn.init.constant_(layer.bias, 0)
+
+    """
+    Helper functions
+    """
+
+    def _normalize_box_offsets(self, boxes):
+        """Normmalize box offsets (not box coordinates) using pre-defined mean
+        and variance. This is to ensure the regression loss (which depends on
+        box offset values) is balanced with the classification loss.
+
+        Refer to the Fast R-CNN paper, multi-task loss for more details.
+            Girshick, R. (2015). Fast R-CNN.
+        """
+        if not self.normalize_offsets:
+            return boxes
+
+        is_list = isinstance(boxes, (list, tuple))
+        if is_list:
+            num_boxes = [len(box) for box in boxes]
+            boxes = torch.cat(boxes, dim=0)
+
+        self.offsets_mean = self.offsets_mean.to(boxes.device)
+        self.offsets_std = self.offsets_std.to(boxes.device)
+        boxes = (boxes - self.offsets_mean) / self.offsets_std
+
+        if is_list:
+            return torch.split(boxes, num_boxes, dim=0)
+        return boxes
+
+    def _inv_normalize_box_offsets(self, boxes):
+        """Same as `_normalize_box_offsets`, but is inversed."""
+        if not self.normalize_offsets:
+            return boxes
+
+        is_list = isinstance(boxes, (list, tuple))
+        if is_list:
+            num_boxes = [len(box) for box in boxes]
+            boxes = torch.cat(boxes, dim=0)
+
+        self.offsets_mean = self.offsets_mean.to(boxes.device)
+        self.offsets_std = self.offsets_std.to(boxes.device)
+        boxes = boxes * self.offsets_std + self.offsets_mean
+
+        if is_list:
+            return torch.split(boxes, num_boxes, dim=0)
+        return boxes
+
+
 class FasterRCNN(nn.Module):
     def __init__(self, backbone, rpn_head):
         super(FasterRCNN, self).__init__()

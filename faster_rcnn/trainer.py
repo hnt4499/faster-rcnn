@@ -93,25 +93,32 @@ class Trainer:
 
     def _initialize_dataloaders(self, train_collate_fn, test_collate_fn):
         self.dataloaders = {}
+        batch_size = self.config["training"]["batch_size"]
 
         for set_name, set_info in self.config["data"].items():
             if set_name == "train":
                 main_args_2 = "training"
-                self.config["training"]["shuffle"] = True
-                self.config["training"]["collate_fn"] = train_collate_fn
+                shuffle = True
+                collate_fn = train_collate_fn
+                bs = batch_size
             else:
                 main_args_2 = "evaluating"
-                self.config["evaluating"]["shuffle"] = False
-                self.config["evaluating"]["collate_fn"] = test_collate_fn
+                shuffle = False
+                collate_fn = test_collate_fn
+                batch_size_multiplier = self.config["training"].get(
+                    "batch_size_multiplier", 1.0)
+                bs = round(batch_size * batch_size_multiplier)
 
             main_args = f"data->{set_name},{main_args_2}"
             self.dataloaders[set_name] = self._initialize_dataloaders_helper(
-                format=set_info["format"], main_args=main_args)
+                format=set_info["format"], main_args=main_args, batch_size=bs,
+                shuffle=shuffle, collate_fn=collate_fn)
 
-    def _initialize_dataloaders_helper(self, format, main_args):
-        dataset = registry["dataset"][format](self.config, main_args=main_args)
+    def _initialize_dataloaders_helper(self, format, main_args, **kwargs):
+        dataset = registry["dataset"][format](
+            self.config, main_args=main_args)
         dataloader = DataLoader(self.config, dataset=dataset,
-                                main_args=main_args)
+                                main_args=main_args, **kwargs)
         return dataloader
 
     @from_config(requires_all=True)

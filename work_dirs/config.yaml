@@ -59,6 +59,7 @@ training:
     device: cuda
     learning_rate: 0.0001
     batch_size: 16
+    batch_size_multiplier: 1.5  # eval/train batch size ratio
     num_epochs: 1000
     num_workers: 1
     testing: true  # set to 'true' to perform only 10 iterations per epoch

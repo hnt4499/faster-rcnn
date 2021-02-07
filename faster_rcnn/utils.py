@@ -190,7 +190,7 @@ def from_config(main_args=None, requires_all=False):
             not_collected = [arg for arg in init_args if arg not in collected]
             collect(config, not_collected, collected)
             # Validate
-            if requires_all and (len(collected) != len(init_args)):
+            if requires_all and (len(collected) < len(init_args)):
                 not_collected = [arg for arg in init_args
                                  if arg not in collected]
                 raise RuntimeError(
